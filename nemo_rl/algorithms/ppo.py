@@ -109,7 +109,12 @@ from nemo_rl.utils.timer import TimeoutChecker, Timer
 from nemo_rl.utils.venvs import make_actor_runtime_env
 from nemo_rl.weight_sync.factory import create_weight_synchronizer
 
-from nemo_rl.telemetry.instrumentation import managed_span, trace_fn
+from nemo_rl.telemetry.instrumentation import (
+    Bucket,
+    bucket_scope,
+    managed_span,
+    trace_fn,
+)
 
 from nemo_rl.telemetry.config import TelemetryConfig
 from nemo_rl.telemetry.setup import get_telemetry
@@ -3119,6 +3124,9 @@ def validate(
             "rl.ppo.evaluate",
             tracer=_tracer,
         ),
+        # Scored-and-discarded generation: overhead, not goodput. See the same
+        # scope in nemo_rl/algorithms/grpo.py::validate.
+        bucket_scope(Bucket.OVERHEAD),
     ):
         print(f"▶ Starting validation at step {step}...", flush=True)
 
