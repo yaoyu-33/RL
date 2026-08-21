@@ -112,9 +112,7 @@ dependencies = [
 # Optional OpenTelemetry instrumentation via nemo-lens (resolved from PyPI).
 # When this extra is not installed, every telemetry site degrades to a ~0-cost
 # no-op through nemo_rl/telemetry/_fallbacks.py.
-telemetry = [
-  "nemo-lens[sdk]>=0.1.0",
-]
+telemetry = ["nemo-lens[sdk]>=0.1.0"]
 # Keep non-SGLang backends on their pre-SGLang-upgrade Transformers versions.
 # FSDP retains the shared range because it can be combined with other backend extras.
 fsdp = [
