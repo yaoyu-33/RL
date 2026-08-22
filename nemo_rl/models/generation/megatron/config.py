@@ -42,6 +42,8 @@ class MCoreGenerationSpecificArgs(TypedDict):
     # - 'block': graphs are owned at the enclosing block (TransformerBlock / HybridBlock).
     # Only meaningful when cuda_graph_impl='local'.
     inference_cuda_graph_scope: NotRequired[str]
+    # Required for EP>1 + local CUDA graphs.
+    moe_pad_experts_for_cuda_graph_inference: NotRequired[bool]
 
     materialize_only_last_token_logits: bool
     enable_chunked_prefill: bool
@@ -74,9 +76,6 @@ class MCoreGenerationSpecificArgs(TypedDict):
     kv_cache_management_mode: Literal["persist", "offload"]
 
     logging_step_interval: NotRequired[int]
-
-    # Merged into megatron_cfg for gen workers; required for EP>1 + local CUDA graphs.
-    moe_pad_experts_for_cuda_graph_inference: NotRequired[bool]
 
 
 class MCoreGenerationConfig(GenerationConfig):
