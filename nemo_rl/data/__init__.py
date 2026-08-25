@@ -45,6 +45,18 @@ class PreferenceDatasetConfig(TypedDict):
     system_prompt_file: NotRequired[str | None]
 
 
+class OAPLDatasetConfig(TypedDict):
+    dataset_name: NotRequired[str]
+    data_path: NotRequired[str]
+    # beta must match algorithms.oapl.OAPLLossConfig.beta: log Z(x) is
+    # precomputed here at data-load time using this beta.
+    beta: float
+    subset: NotRequired[str | None]
+    split: NotRequired[str]
+    prompt_file: NotRequired[str | None]
+    system_prompt_file: NotRequired[str | None]
+
+
 class DataConfig(TypedDict):
     max_input_seq_length: int | None
     add_bos: NotRequired[bool]
@@ -63,15 +75,23 @@ class DataConfig(TypedDict):
     num_prompts_per_dataloader: NotRequired[int]
     custom_dataloader: NotRequired[str]
     # dataset configs
-    train: ResponseDatasetConfig | PreferenceDatasetConfig | list[ResponseDatasetConfig]
+    train: (
+        ResponseDatasetConfig
+        | PreferenceDatasetConfig
+        | OAPLDatasetConfig
+        | list[ResponseDatasetConfig]
+    )
     validation: NotRequired[
         ResponseDatasetConfig
         | PreferenceDatasetConfig
+        | OAPLDatasetConfig
         | list[ResponseDatasetConfig]
         | None
     ]
     # default settings for all datasets, will be overridden by dataset-specific settings
-    default: NotRequired[ResponseDatasetConfig | PreferenceDatasetConfig | None]
+    default: NotRequired[
+        ResponseDatasetConfig | PreferenceDatasetConfig | OAPLDatasetConfig | None
+    ]
 
 
 # ===============================================================================
