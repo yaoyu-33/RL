@@ -18,7 +18,7 @@ import math
 import statistics
 from collections.abc import Sequence
 
-from wandb.data_types import Histogram
+from wandb import Histogram
 
 
 def calculate_single_metric(
