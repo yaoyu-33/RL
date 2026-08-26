@@ -264,6 +264,7 @@ basic_megatron_test_config: PolicyConfig = {
     "dtensor_cfg": {"enabled": False},
     "dynamic_batching": {"enabled": False},
     "sequence_packing": {"enabled": False},
+    "make_sequence_length_divisible_by": 1,
     "megatron_cfg": {
         "enabled": True,
         "empty_unused_memory_level": 0,
@@ -358,6 +359,7 @@ basic_megatron_test_config: PolicyConfig = {
             "materialize_only_last_token_logits": True,
             "num_speculative_tokens": 0,
             "refit_impl": "bridge",
+            "logprobs_mode": "processed_logprobs",
             "refit_backend": "gloo",  # not nvshmem: its NVLS multicast init is unavailable in CI
             "refit_execution_batch_bytes": None,
             "parsers": [],
@@ -491,13 +493,14 @@ async def _generate_async(mg, tokenizer, test_input_data, greedy=False):
 @pytest.mark.mcore
 @pytest.mark.timeout(900)
 @pytest.mark.parametrize(
-    "tensor_parallel_size,pipeline_parallel_size,top_p,top_k",
+    "tensor_parallel_size,pipeline_parallel_size,top_p,top_k,logprobs_mode",
     [
-        (1, 1, 1.0, None),
-        (2, 1, 1.0, None),
-        (1, 2, 1.0, None),
-        (1, 1, 0.9, 8000),
-        (1, 1, 1.0, 1),
+        (1, 1, 1.0, None, "processed_logprobs"),
+        (2, 1, 1.0, None, "processed_logprobs"),
+        (1, 2, 1.0, None, "processed_logprobs"),
+        (1, 1, 0.9, 8000, "processed_logprobs"),
+        (1, 1, 1.0, 1, "processed_logprobs"),
+        (1, 1, 1.0, 1, "raw_logprobs"),
     ],
 )
 def test_megatron_policy_generation(
@@ -508,6 +511,7 @@ def test_megatron_policy_generation(
     pipeline_parallel_size,
     top_p,
     top_k,
+    logprobs_mode,
 ):
     """Standalone Megatron generation across tp/pp and sampling params."""
     if cluster.num_gpus_per_node < tensor_parallel_size * pipeline_parallel_size:
@@ -521,6 +525,7 @@ def test_megatron_policy_generation(
     config["megatron_cfg"]["pipeline_model_parallel_size"] = pipeline_parallel_size
     config["generation"]["top_p"] = top_p
     config["generation"]["top_k"] = top_k
+    config["generation"]["mcore_generation_config"]["logprobs_mode"] = logprobs_mode
     # config-level stop string, unioned with the per-sample stop strings below.
     config["generation"]["stop_strings"] = ["</s>"]
 
@@ -544,14 +549,21 @@ def test_megatron_policy_generation(
                 start = test_input_data["input_lengths"][i].item()
                 end = start + sampled["generation_lengths"][i].item()
                 gen_logprobs = sampled["logprobs"][i, start:end]
-                # Processed logprobs are exactly 0.0 where the argmax is unique;
-                # bf16 max-ties renormalize to log(1/n). Raw logprobs are never
-                # exactly 0, so a mostly-exact-0 row pins the processed mode.
-                assert (gen_logprobs <= 0).all() and (
-                    (gen_logprobs == 0.0).float().mean() >= 0.5
-                ), (
-                    f"expected mostly-exact-0 processed logprobs under top_k=1, got {gen_logprobs}"
-                )
+                assert (gen_logprobs <= 0).all()
+                if logprobs_mode == "processed_logprobs":
+                    # Processed logprobs are exactly 0.0 where the argmax is
+                    # unique; bf16 max-ties renormalize to log(1/n).
+                    assert (gen_logprobs == 0.0).float().mean() >= 0.5, (
+                        "expected mostly-exact-0 processed logprobs under "
+                        f"top_k=1, got {gen_logprobs}"
+                    )
+                else:
+                    # Raw model probabilities are computed before top-k=1 and
+                    # therefore retain nonzero uncertainty.
+                    assert (gen_logprobs < 0.0).float().mean() >= 0.5, (
+                        "expected mostly-negative raw logprobs under top_k=1, "
+                        f"got {gen_logprobs}"
+                    )
 
         # per-sample stop strings are merged with the config stop string (may stop early,
         # so don't require a generated token)

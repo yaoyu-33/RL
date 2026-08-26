@@ -2972,9 +2972,6 @@ def test_setup_auto_enables_skip_reference_logprobs_with_legacy_policy_factory(
         def prepare_refit_info(self):
             return {}
 
-        def set_rollout_num_gpus_per_engine(self, _num_gpus_per_engine):
-            pass
-
     def legacy_policy_factory(
         *,
         cluster,
@@ -3000,6 +2997,9 @@ def test_setup_auto_enables_skip_reference_logprobs_with_legacy_policy_factory(
 
     class DummySGLangGeneration:
         num_gpus_per_engine = 1
+        pause_generation_mode = "retract"
+        cfg: dict = {}
+        weight_synchronizer = None
 
         def finish_generation(self):
             pass
@@ -3039,10 +3039,12 @@ def test_setup_auto_enables_skip_reference_logprobs_with_legacy_policy_factory(
         "resources": {"gpus_per_node": None, "num_nodes": None},
     }
     master_config.policy["generation"]["sglang_cfg"] = {
+        "quantization": {"scheme": "bf16"},
         "gpus_per_server": 1,
         "dp_size": 1,
         "pp_size": 1,
         "ep_size": 1,
+        "sglang_server_config": {},
     }
     master_config.loss_fn = ClippedPGLossConfig(reference_policy_kl_penalty=0.0)
     master_config.grpo.val_period = 0
@@ -3189,7 +3191,7 @@ def test_setup_starts_nemo_gym_for_trtllm(monkeypatch, mock_grpo_components):
     )
 
 
-def test_setup_refits_megatron_before_starting_nemo_gym(
+def test_setup_refits_megatron_after_overlapped_nemo_gym_init(
     monkeypatch, mock_grpo_components
 ):
     """A skip-load Megatron server must start only after its initial refit."""
@@ -3203,6 +3205,12 @@ def test_setup_refits_megatron_before_starting_nemo_gym(
         dp_openai_server_base_urls=[],
     )
     generation_init = MagicMock(return_value=generation)
+    port_holder = object()
+    generation_init.reserve_http_server_address.return_value = (
+        "http://megatron.example/v1",
+        12345,
+        port_holder,
+    )
     synchronizer = MagicMock()
     synchronizer.init_communicator.side_effect = lambda: events.append("init")
 
@@ -3232,6 +3240,8 @@ def test_setup_refits_megatron_before_starting_nemo_gym(
     monkeypatch.setattr(grpo_mod, "RayVirtualCluster", MagicMock)
     monkeypatch.setattr(grpo_mod, "Policy", lambda *_args, **_kwargs: MagicMock())
     monkeypatch.setattr(grpo_mod, "MegatronGeneration", generation_init)
+    kill_port_holder = MagicMock()
+    monkeypatch.setattr(grpo_mod.ray, "kill", kill_port_holder)
     monkeypatch.setattr(
         grpo_mod, "create_weight_synchronizer", lambda **_kwargs: synchronizer
     )
@@ -3272,7 +3282,9 @@ def test_setup_refits_megatron_before_starting_nemo_gym(
     result = grpo_mod.setup(master_config, MagicMock(), dataset, None)
 
     assert generation_init.call_args.kwargs["skip_weight_load"] is True
-    assert events == ["init", "sync", "gym"]
+    assert generation_init.call_args.kwargs["reserved_http_server_port"] == 12345
+    assert events == ["gym", "init", "sync"]
+    kill_port_holder.assert_called_once_with(port_holder)
     assert result[2] is nemo_gym_actor
 
 

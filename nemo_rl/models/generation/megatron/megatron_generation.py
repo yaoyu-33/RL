@@ -244,7 +244,6 @@ class MegatronGeneration(GenerationInterface):
         # warmup would execute the wrong tensor type). refit_policy_generation calls
         # prepare_for_generation(tags=["kv_cache"]) after the first weight transfer,
         # which initializes the engine and captures against the final buffers.
-        #
         if not skip_weight_load:
             self.prepare_for_generation()
 
@@ -444,7 +443,7 @@ class MegatronGeneration(GenerationInterface):
         )
 
     def preinit_nvshmem_collective(self) -> list[ray.ObjectRef]:
-        """Pre-initialize NVShmem collectively after CUDA graph capture.
+        """Pre-initialize NVShmem collectively outside CUDA graph capture.
 
         Must be called simultaneously on both training and inference workers.
         """
