@@ -160,6 +160,7 @@ def test_fp8_export_payload_survives_for_non_megatron_backends() -> None:
     )
 
     worker.cfg = {"generation": {"backend": "vllm"}}
+    worker.refit_payload_mode = "bridge_export"
     list(worker._iter_params_with_optional_kv_scales())
     forwarded = worker.megatron_bridge.export_hf_weights.call_args.kwargs[
         "conversion_tasks"
@@ -169,6 +170,7 @@ def test_fp8_export_payload_survives_for_non_megatron_backends() -> None:
     assert forwarded[0].param_weight.dtype == torch.float8_e4m3fn
 
     worker.cfg = {"generation": {"backend": "megatron"}}
+    worker.refit_payload_mode = "logical_weights"
     list(worker._iter_params_with_optional_kv_scales())
     megatron_forwarded = worker.megatron_bridge.export_hf_weights.call_args.kwargs[
         "conversion_tasks"
