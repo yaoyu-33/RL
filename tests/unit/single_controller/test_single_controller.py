@@ -143,6 +143,7 @@ def test_logs_hyperparameters_and_concrete_weight_synchronizer(
         inference_cluster=None,
         save_state=_initial_grpo_save_state(),
         last_checkpoint_path=None,
+        finalizer_actors=[],
     )
     controller_cls = SingleControllerActor.__ray_metadata__.modified_class
 
