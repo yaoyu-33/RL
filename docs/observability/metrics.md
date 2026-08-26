@@ -1,69 +1,23 @@
 # Metrics
 
-NeMo-RL emits two namespaces of metrics: RL training metrics (`rl.*`) and vLLM generation metrics (`gen_ai.*`, following the OTel GenAI semantic conventions).
+NeMo-RL emits two namespaces of metrics: async efficiency metrics (`rl.efficiency.*`) and vLLM generation metrics (`gen_ai.*`, following the OTel GenAI semantic conventions).
 
 Metrics are emitted **only when telemetry is exporting** — the driver always exports, so the `rl.*` series come from the driver's metrics logger. For the general instrument pattern (per-Meter caching, `None`-skipping), see [lens: metrics](https://github.com/NVIDIA-NeMo/Lens).
 
-## RL training metrics (`rl.*`)
-
-Training has no OTel standard, so NeMo-RL uses a project-specific application scope. These are recorded via `nemo.lens.instruments.rl.record_rl_metrics` from the driver.
-
-| Metric | Type | Description |
-|---|---|---|
-| `rl.reward.mean` | Gauge | Mean reward over the batch |
-| `rl.kl_divergence` | Gauge | KL divergence from the reference policy |
-| `rl.policy_loss` | Gauge | Policy (actor) loss |
-| `rl.value_loss` | Gauge | Value (critic) loss — PPO |
-| `rl.entropy` | Gauge | Policy entropy |
-| `rl.response_length.mean` | Gauge | Mean generated response length (tokens) |
-| `rl.grad_norm` | Gauge | Global gradient norm — needs a lens build newer than 0.1.0 (see below) |
-| `rl.learning_rate` | Gauge | Current learning rate — needs a lens build newer than 0.1.0 |
-| `rl.tokens_per_sec` | Gauge | Training throughput (tokens/sec), summed over the job's devices — needs a lens build newer than 0.1.0 |
-
-Loss, reward, KL, grad norm, learning rate, and throughput are **Gauges** (point-in-time value per log step), not Histograms — semantically correct for a value that changes every log interval.
-
-The last three are wired on the NeMo-RL side but depend on lens: `record_rl_metrics` in nemo-lens 0.1.0 accepts only `reward_mean`, `kl_divergence`, `policy_loss`, `value_loss`, `entropy`, `response_length_mean`, `generation_duration_ms` and `rollout_duration_ms`. The tee drops any field the installed build does not accept, so against 0.1.0 these three are silently absent rather than an error — and the `performance` prefix branch, whose only field is `tokens_per_sec`, is inert for the same reason. They start flowing as soon as a lens release declares the instruments; nothing here changes.
-
-Lens also declares `rl.generation.duration_ms` and `rl.rollout.duration_ms` histograms, but NeMo-RL does not emit them: the Logger tee has no candidate key for either, so no call site passes those fields. Read phase durations from the spans instead.
-
-## How the `rl.*` gauges are populated (the Logger tee)
-
-NeMo-RL does not sprinkle `record_rl_metrics()` calls through the algorithm code. Instead, `nemo_rl/telemetry/metrics.py` **tees** the scalar metrics that already flow through `nemo_rl.utils.logger.Logger.log_metrics` into nemo-lens: after `log_metrics` fans out to the file / W&B / MLflow backends, it calls `tee_rl_metrics_to_otel(metrics, prefix)`.
-
-`log_metrics` fans one step out as several dicts under different prefixes, and only two are teed: the driver's **`train`** scalars (`prefix in ("train", "")`) and the **`performance`** throughput dict. Other prefixes are skipped. The tee is best-effort — a raw metrics dict is matched against a fixed key map, the first present candidate key wins, and unknown keys or non-scalar values are silently skipped. It is a no-op unless telemetry is actively exporting.
-
-| Logger prefix | Logger metric key | Emitted metric |
-|---|---|---|
-| `train` / `""` | `reward` | `rl.reward.mean` |
-| `train` / `""` | `kl_penalty` | `rl.kl_divergence` |
-| `train` / `""` | `loss` | `rl.policy_loss` |
-| `train` / `""` | `critic/loss` | `rl.value_loss` |
-| `train` / `""` | `approx_entropy` | `rl.entropy` |
-| `train` / `""` | `mean_gen_tokens_per_sample` | `rl.response_length.mean` |
-| `train` / `""` | `grad_norm` | `rl.grad_norm` |
-| `train` / `""` | `lr` | `rl.learning_rate` |
-| `performance` | `tokens_per_sec` | `rl.tokens_per_sec` |
-
-The NeMo-RL key and the lens field name differ on most rows, which is the whole reason the map exists. `kl_penalty` is the one worth reading twice: the logged value is divided back out by the penalty coefficient, so it is the KL divergence despite the key's name.
-
-Every key above is one some algorithm actually logs. Speculative aliases are worse than none — a gauge listing three plausible names and matching all of them nowhere looks wired and reports nothing — so `test_every_mapped_metric_candidate_is_emitted_somewhere` fails the build if a candidate stops being emitted.
-
-This means the metrics you already log to W&B are the same series you get in your OTLP backend — no double bookkeeping. If an algorithm logs a scalar under a key not in this map, add a candidate to the map for **the prefix that dict is logged under** — `_RL_OTEL_METRIC_MAP` or `_PERFORMANCE_OTEL_METRIC_MAP` (see [Extending](extending.md)). A candidate listed under the wrong prefix simply never matches.
-
-`rl.tokens_per_sec` is the job-wide rate. The per-GPU throughputs alongside it in the same dict are deliberately not candidates: they would land in the same series at 1/N of the value.
-
-The same tee also emits the async efficiency durations, which do not go through `record_rl_metrics` — see below.
+Training scalars — reward, loss, KL, grad norm, learning rate, throughput — are **not** mirrored to OTel. nemo-lens declares `record_rl_metrics` gauges for most of them, plus `rl.generation.duration_ms` and `rl.rollout.duration_ms` histograms, but NeMo-RL emits none of them: mapping its logger keys onto lens's fixed fields is still being settled with the lens owners. Read those scalars from W&B / TensorBoard, and phase durations from the spans.
 
 ## Async efficiency metrics (`rl.efficiency.*`)
 
 Async GRPO measures where wall time goes with a `Timer` and logs the result as `efficiency/*` scalars (`print_efficiency_summary` in `nemo_rl/algorithms/utils.py`). Those same values are teed to OTel as one **dimensioned** gauge rather than one instrument per category, so adding a category needs no instrument change.
+
+The tee lives outside the algorithm code: `nemo_rl/telemetry/metrics.py` hooks `nemo_rl.utils.logger.Logger.log_metrics`, so after `log_metrics` fans a step out to the file / W&B / MLflow backends it calls `tee_rl_metrics_to_otel(metrics, prefix)`. It is best-effort — only the driver's `train` dicts (`prefix in ("train", "")`) carry the efficiency scalars, so other prefixes are skipped, non-scalar values are ignored, and the whole path is a no-op unless telemetry is actively exporting. The efficiency numbers you already see in W&B are therefore the same series you get in your OTLP backend, with no double bookkeeping.
 
 | Metric | Type | Attributes | Description |
 |---|---|---|---|
 | `rl.efficiency.seconds` | Gauge (`s`) | `rl.efficiency.category`, `rl.efficiency.measurement`, `rl.efficiency.window`, `rl.bucket` | Time attributed to one efficiency category |
 | `rl.efficiency.pct` | Gauge (`%`) | `rl.efficiency.measurement`, `rl.efficiency.window` | Productive share of one step's driver-side wall clock |
 
-Unlike the training scalars above, these instruments are defined in `nemo_rl/telemetry/metrics.py` rather than in lens, because they are keyed by NeMo-RL's own efficiency-category labels and there is no fixed lens field for them.
+These instruments are defined in `nemo_rl/telemetry/metrics.py` rather than in lens, because they are keyed by NeMo-RL's own efficiency-category labels and there is no fixed lens field for them.
 
 ### Always filter on `rl.efficiency.measurement`
 
@@ -114,7 +68,7 @@ The one rule that trips people up. Classify each value before you emit it:
 
 | Kind | Use | Example |
 |---|---|---|
-| **Metric** | numerical value that changes over time | reward, loss, KL, grad norm, throughput → `rl.*` |
+| **Metric** | numerical value that changes over time | per-category efficiency seconds → `rl.efficiency.seconds` |
 | **Span tag** | categorical per-span context for filtering | `rl.iteration`, `rl.bucket`, `rl.num_generations_per_prompt`, `rl.weight_version` |
 | **Resource attribute** | stable for the whole run | `rl.algorithm`, `rl.model`, `dl.tensor_parallel.size` |
 

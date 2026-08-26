@@ -119,7 +119,7 @@ if telemetry is not None:
 | Span name | `rl.<algorithm>.<operation>` | `rl.grpo.collect_rollouts` |
 | Span tag | `rl.<attr>` categorical | `rl.iteration`, `rl.backend` |
 | Resource attribute | `rl.<attr>` / shared `dl.<attr>` | `rl.model`, `dl.tensor_parallel.size` |
-| Metric name | `rl.<subsystem>.<metric>` (application scope) | `rl.reward.mean` |
+| Metric name | `rl.<subsystem>.<metric>` (application scope) | `rl.efficiency.seconds` |
 
 Metric names use the **application scope** (`rl.*`) — never `dl.*`. Attribute names shared across consumers use the constants in `nemo.lens.semconv`; RL-specific short strings are fine hard-coded.
 
@@ -146,11 +146,12 @@ Keep the base-class contract — shared with lens and its other consumers — co
 
 ## Adding a metric
 
-The `rl.*` gauges are populated by teeing `Logger.log_metrics` (see [Metrics](metrics.md)) — not by scattering `record_rl_metrics()` calls. So there are two cases:
+NeMo-RL records its `rl.*` metrics from the driver rather than scattering record calls through the algorithm code (see [Metrics](metrics.md)). Two cases:
 
-- **The scalar already flows through `Logger.log_metrics`** but isn't teed. Add a candidate key (or a new field) to the map for the prefix that dict is logged under — `_RL_OTEL_METRIC_MAP` for `train`/`""`, `_PERFORMANCE_OTEL_METRIC_MAP` for `performance` — in `nemo_rl/telemetry/metrics.py`, and add the matching field to `record_rl_metrics` in lens's `nemo.lens.instruments.rl`. Check where the dict is actually logged: a candidate under the wrong prefix compiles, passes review, and never fires. If the metric arrives under a third prefix, add that prefix to the dispatch in `tee_rl_metrics_to_otel` with its own map.
 - **You need a brand-new instrument** (a new counter/gauge/histogram, or a value that doesn't go through the Logger). Add it to `nemo.lens.instruments.rl` following the per-Meter `WeakKeyDictionary` caching pattern, then record it from the driver via `telemetry.meter`. The `new-instrument` lens skill covers this.
-- **The series is keyed by a NeMo-RL-specific label set** rather than a fixed field — e.g. one value per efficiency category. `record_rl_metrics` takes fixed keyword fields, so a growing label set doesn't fit it. Define the instrument in `nemo_rl/telemetry/metrics.py` instead (same per-Meter caching pattern) and emit **one dimensioned instrument** with the label as an attribute, not one instrument per label. `rl.efficiency.seconds` is the worked example. This also avoids gating the feature on a lens release.
+- **The series is keyed by a NeMo-RL-specific label set** rather than a fixed field — e.g. one value per efficiency category. Lens's `record_rl_metrics` takes fixed keyword fields, so a growing label set doesn't fit it. Define the instrument in `nemo_rl/telemetry/metrics.py` instead (same per-Meter caching pattern) and emit **one dimensioned instrument** with the label as an attribute, not one instrument per label. `rl.efficiency.seconds` is the worked example. This also avoids gating the feature on a lens release.
+
+A training scalar that already flows through `Logger.log_metrics` is a third case with no home yet: mapping NeMo-RL's logger keys onto lens's `record_rl_metrics` fields is still being settled with the lens owners, so the only tee on that hook today is the efficiency one.
 
 Prefer an attribute over a name whenever the label set can grow: `rl.efficiency.seconds{rl.efficiency.category="idle/refit_bubble"}` stays stable as categories come and go, while `rl.efficiency.idle_refit_bubble_seconds` forces an instrument change per category. Keep attribute cardinality bounded — a per-step or per-request value belongs on a span, not a metric label.
 
@@ -163,7 +164,7 @@ NeMo-RL telemetry tests live under `tests/` and use lens's in-memory exporter fi
 1. Assert the span is emitted when its group is enabled and absent when disabled.
 2. Assert on span name, tags, and parent relationships.
 
-For a pure metrics-tee change, `map_rl_metrics` in `nemo_rl/telemetry/metrics.py` is a pure function — unit-test the key mapping directly with no OTel setup.
+For a pure metrics-tee change, `map_efficiency_seconds` in `nemo_rl/telemetry/metrics.py` is a pure function — unit-test the key mapping directly with no OTel setup.
 
 ## When not to add instrumentation
 

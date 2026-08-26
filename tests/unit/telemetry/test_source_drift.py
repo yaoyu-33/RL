@@ -16,7 +16,7 @@ import ast
 import re
 from pathlib import Path
 
-from tests.unit.telemetry.conftest import algorithms_utils_categories, string_constants
+from tests.unit.telemetry.conftest import algorithms_utils_categories
 
 _REPO = Path(__file__).resolve().parents[3]
 _ALGORITHMS = _REPO / "nemo_rl" / "algorithms"
@@ -135,40 +135,3 @@ def test_every_emitted_span_name_is_documented():
 def _span_names_in(markdown: str) -> set[str]:
     """Every ``rl.*`` name in backticks, which is how the doc tables list them."""
     return set(re.findall(r"`(rl\.[a-z0-9_.]+)`", markdown))
-
-
-def test_every_mapped_metric_candidate_is_emitted_somewhere():
-    """The OTel metric map asserts that its candidate keys are real.
-
-    A gauge whose candidates match nothing looks wired and reports nothing, and
-    the failure surfaces as a flat line in a dashboard months later. This is the
-    guard the map lacked when three of its gauges were dead on arrival.
-    """
-    metrics_source = (_REPO / "nemo_rl" / "telemetry" / "metrics.py").read_text()
-    candidates: set[str] = set()
-    for node in ast.walk(ast.parse(metrics_source)):
-        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
-            continue
-        if not node.target.id.endswith("_OTEL_METRIC_MAP"):
-            continue
-        for value in getattr(node.value, "values", []):
-            candidates |= string_constants(value)
-    assert candidates, "found no metric map candidates -- has the matcher gone stale?"
-
-    # Textual rather than AST: these keys are built into metric dicts in many
-    # shapes (literal keys, f-strings, dict updates), and all that matters here
-    # is that some algorithm names the key at all.
-    haystack = "\n".join(
-        path.read_text()
-        for path in _python_sources(_REPO / "nemo_rl")
-        if "telemetry" not in path.parts
-    )
-    missing = sorted(
-        key
-        for key in candidates
-        if not re.search(rf"""["']{re.escape(key)}["']""", haystack)
-    )
-    assert not missing, (
-        "metric map candidates that no algorithm emits, so their gauge can "
-        f"never receive a value: {missing}"
-    )

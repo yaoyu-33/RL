@@ -1,6 +1,6 @@
 # Observability
 
-NeMo RL is instrumented with [OpenTelemetry](https://opentelemetry.io/) via the [`nemo-lens`](https://github.com/NVIDIA-NeMo/Lens) library. It emits **traces** at RL-algorithm boundaries (rollout, generation, reward, advantage, policy update, ...) and **metrics** for reward, loss, KL, throughput, and more.
+NeMo RL is instrumented with [OpenTelemetry](https://opentelemetry.io/) via the [`nemo-lens`](https://github.com/NVIDIA-NeMo/Lens) library. It emits **traces** at RL-algorithm boundaries (rollout, generation, reward, advantage, policy update, ...) and **metrics** for async efficiency accounting and vLLM generation.
 
 Telemetry exports OTLP and works with any OTLP-compatible backend or an OpenTelemetry Collector (e.g. Jaeger, Grafana Tempo, or an OpenTelemetry Collector that fans out to your backend of choice).
 
@@ -54,7 +54,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317   # your OTLP backend /
 uv run examples/run_grpo.py --config examples/configs/grpo_math_1B.yaml
 ```
 
-With `default` span groups, NeMo-RL emits a handful of coarse spans (job, checkpoint, evaluate) plus a steady stream of `rl.*` metrics. Switch to `per_step` for per-step traces (rollout/generation/reward/...), or `all` for everything.
+With `default` span groups, NeMo-RL emits a handful of coarse spans (job, checkpoint, evaluate) plus whatever `rl.*` metrics the driver's logger produces. Switch to `per_step` for per-step traces (rollout/generation/reward/...), or `all` for everything.
 
 Keeping the settings in the config file is what makes a run's telemetry reproducible from the file alone. The endpoint is the exception: `OTEL_EXPORTER_OTLP_*` are the standard OpenTelemetry variables, and they belong in the environment because they describe where you are running, not what you are measuring. See [Configuration](configuration.md).
 
@@ -77,7 +77,7 @@ Each span belongs to a **span group** that controls whether it is emitted at run
 ## What gets exported
 
 - **Traces**: any OTLP-compatible backend (Jaeger, Grafana Tempo, an OpenTelemetry Collector, ...) via OTLP.
-- **Metrics**: the `rl.*` catalog (reward, loss, KL, grad norm, learning rate, throughput) teed from the driver's metrics logger — see [Metrics](metrics.md).
+- **Metrics**: the `rl.efficiency.*` async accounting teed from the driver's metrics logger, plus the vLLM `gen_ai.*` series — see [Metrics](metrics.md).
 - **Logs** (optional): via the OTel log bridge when `NEMO_RL_OTEL_LOGS_ENABLED=1` — correlates Python `logging` records with the active span's trace ID.
 
 By default, only **one rank** exports (`single_rank`, last rank). The driver always exports (it hosts the training loop and the metrics logger). See [Configuration — Export strategy](configuration.md#export-strategy).

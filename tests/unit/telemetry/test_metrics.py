@@ -1,132 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the RL metrics -> nemo-lens tee."""
+"""Tests for the async efficiency metrics -> OTel tee."""
 
 import logging
 
 import pytest
 
-from nemo_rl.telemetry.metrics import map_efficiency_seconds, map_rl_metrics
-
-
-def test_map_basic_keys():
-    mapped = map_rl_metrics(
-        {
-            "reward": 0.5,
-            "loss": 1.0,
-            "grad_norm": 2.0,
-            "lr": 1e-4,
-            "mean_gen_tokens_per_sample": 64,
-        }
-    )
-    assert mapped["reward_mean"] == 0.5
-    assert mapped["policy_loss"] == 1.0
-    assert mapped["grad_norm"] == 2.0
-    assert mapped["learning_rate"] == 1e-4
-    assert mapped["response_length_mean"] == 64.0
-
-
-def test_map_performance_keys():
-    from nemo_rl.telemetry.metrics import _PERFORMANCE_OTEL_METRIC_MAP
-
-    mapped = map_rl_metrics(
-        {
-            "tokens_per_sec": 4000.0,
-            # Per-GPU rates share the dict; mapping them into the same job-wide
-            # gauge would report 1/N of the real throughput.
-            "tokens_per_sec_per_gpu": 500.0,
-            "generation_tokens_per_sec": 9000.0,
-        },
-        _PERFORMANCE_OTEL_METRIC_MAP,
-    )
-    assert mapped == {"tokens_per_sec": 4000.0}
-
-
-def test_throughput_is_not_reachable_from_the_train_map():
-    # Drift guard for the whole prefix arrangement: tokens_per_sec is logged
-    # under "performance", so a candidate in the train map can never fire.
-    assert map_rl_metrics({"tokens_per_sec": 4000.0}) == {}
-
-
-def test_map_first_candidate_wins():
-    # Every production field currently has a single candidate, so this pins the
-    # tie-break rule with an explicit map rather than relying on the shape of
-    # _RL_OTEL_METRIC_MAP, which is free to change.
-    mapped = map_rl_metrics(
-        {"preferred": 1.0, "fallback": 2.0},
-        {"policy_loss": ("preferred", "fallback")},
-    )
-    assert mapped["policy_loss"] == 1.0
-
-
-def test_map_falls_through_to_a_later_candidate():
-    mapped = map_rl_metrics(
-        {"fallback": 2.0},
-        {"policy_loss": ("preferred", "fallback")},
-    )
-    assert mapped["policy_loss"] == 2.0
-
-
-def test_map_skips_bool_and_non_numeric():
-    mapped = map_rl_metrics({"reward": True, "loss": "nan", "approx_entropy": 0.1})
-    assert "reward_mean" not in mapped
-    assert "policy_loss" not in mapped
-    assert mapped["entropy"] == 0.1
-
-
-def test_map_empty_for_unknown_keys():
-    assert map_rl_metrics({"unrelated_metric": 1.0}) == {}
-
-
-def test_tee_emits_only_for_train_prefix_when_exporting():
-    pytest.importorskip("nemo.lens")
-    from nemo.lens import NemoLensConfig, setup_telemetry
-    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-
-    import nemo_rl.telemetry.setup as setup_mod
-    from nemo_rl.telemetry.metrics import tee_rl_metrics_to_otel
-    from nemo_rl.telemetry.span_groups import RLSpanGroup
-
-    reader = InMemoryMetricReader()
-    cfg = NemoLensConfig(enabled=True, _span_group_cls=RLSpanGroup)
-    setup_mod._TELEMETRY_HANDLE = setup_telemetry(
-        cfg, rank=0, world_size=1, metric_reader=reader
-    )
-
-    # Include grad_norm even when the installed lens build does not accept it
-    # yet: the tee must still emit supported fields (reward_mean) instead of
-    # aborting the whole batch on TypeError.
-    tee_rl_metrics_to_otel({"reward": 0.5, "grad_norm": 1.0}, "train")
-    tee_rl_metrics_to_otel({"reward": 9.0}, "validation")  # wrong prefix -> ignored
-
-    data = reader.get_metrics_data()
-    assert data is not None, "expected metrics after train-prefix tee"
-    names = {
-        metric.name
-        for rm in data.resource_metrics
-        for sm in rm.scope_metrics
-        for metric in sm.metrics
-    }
-    assert "rl.reward.mean" in names
-    # On the value, not just the name: a gauge admitting the validation dict
-    # would overwrite this in place and leave every name assertion passing.
-    assert [point.value for point in _gauge_points(data, "rl.reward.mean")] == [0.5]
-    # grad_norm / lr / tokens_per_sec require matching lens instruments; only
-    # assert them when the installed record_rl_metrics accepts those kwargs.
-    import inspect
-
-    from nemo.lens.instruments.rl import record_rl_metrics
-
-    if "grad_norm" in inspect.signature(record_rl_metrics).parameters:
-        assert "rl.grad_norm" in names
+from nemo_rl.telemetry.metrics import map_efficiency_seconds
 
 
 def test_tee_noop_when_not_exporting():
     # No telemetry handle set -> must be a silent no-op (no exception).
     from nemo_rl.telemetry.metrics import tee_rl_metrics_to_otel
 
-    tee_rl_metrics_to_otel({"reward": 0.5}, "train")
+    tee_rl_metrics_to_otel({"efficiency/idle/refit_bubble_s": 12.0}, "train")
 
 
 _MEASUREMENTS = {
@@ -489,32 +377,11 @@ def test_tee_emits_efficiency_pct(monkeypatch):
     assert [point.value for point in points] == [87.5]
 
 
-def test_tee_emits_throughput_from_the_performance_prefix():
-    """`tokens_per_sec` only ever arrives under the "performance" prefix.
-
-    A gate that admits `train`/`""` alone therefore leaves `rl.tokens_per_sec`
-    permanently empty -- an instrument that exists and never receives a point.
-    """
-    pytest.importorskip("nemo.lens")
-    import inspect
-
-    from nemo.lens.instruments.rl import record_rl_metrics
-
-    from nemo_rl.telemetry.metrics import tee_rl_metrics_to_otel
-
-    if "tokens_per_sec" not in inspect.signature(record_rl_metrics).parameters:
-        pytest.skip("installed nemo-lens has no tokens_per_sec instrument")
-
-    reader = _start_exporting_telemetry()
-    tee_rl_metrics_to_otel({"tokens_per_sec": 4000.0}, "performance")
-
-    points = _gauge_points(reader.get_metrics_data(), "rl.tokens_per_sec")
-    assert [point.value for point in points] == [4000.0]
-
-
-def test_tee_skips_efficiency_for_the_performance_prefix():
-    # The efficiency dict is logged under "" -- looking for it under
-    # "performance" too would be dead work on every step.
+def test_tee_skips_prefixes_other_than_train():
+    # The efficiency dict is logged under "train"/"" -- looking for it under the
+    # other prefixes log_metrics fans a step out to would be dead work on every
+    # step, and admitting one would attribute another dict's values to a
+    # category series.
     pytest.importorskip("nemo.lens")
     from nemo_rl.telemetry.metrics import (
         RL_EFFICIENCY_SECONDS_METRIC,
@@ -523,6 +390,7 @@ def test_tee_skips_efficiency_for_the_performance_prefix():
 
     reader = _start_exporting_telemetry()
     tee_rl_metrics_to_otel({"efficiency/idle/refit_bubble_s": 12.0}, "performance")
+    tee_rl_metrics_to_otel({"efficiency/idle/refit_bubble_s": 12.0}, "validation")
 
     assert _gauge_points(reader.get_metrics_data(), RL_EFFICIENCY_SECONDS_METRIC) == []
 
@@ -550,8 +418,8 @@ def test_tee_skips_efficiency_instruments_without_efficiency_keys(monkeypatch):
 def test_tee_never_raises_into_the_training_step(monkeypatch, caplog):
     """Logger.log_metrics calls this unguarded, so it has to swallow everything.
 
-    Exercised through a failure *outside* the two inner handlers -- reading the
-    telemetry handle -- since those are already covered separately.
+    Exercised through a failure *outside* the inner handler -- reading the
+    telemetry handle -- since that one is already covered separately.
     """
     import nemo_rl.telemetry.metrics as metrics_mod
     from nemo_rl.telemetry.metrics import tee_rl_metrics_to_otel

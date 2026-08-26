@@ -12,28 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Best-effort mirroring of NeMo-RL scalar metrics into OTel.
+"""Best-effort mirroring of NeMo-RL's async efficiency metrics into OTel.
 
 Kept out of ``nemo_rl.utils.logger`` (which pulls in torch/ray/wandb/etc.) so
 the mapping stays importable and testable without the heavy training stack.
 ``nemo_rl.utils.logger.Logger.log_metrics`` calls :func:`tee_rl_metrics_to_otel`
 after its normal fan-out to the file/wandb/mlflow backends.
 
-Two families are teed. Standard training scalars (reward, loss, …) go through
-nemo-lens's ``record_rl_metrics``, whose instruments live in lens. The async
-``efficiency/*`` phase durations are emitted from instruments owned here,
-because they are keyed by NeMo-RL's own efficiency-category labels and lens has
-no fixed field for them.
+The async ``efficiency/*`` phase durations are emitted from instruments owned
+here, because they are keyed by NeMo-RL's own efficiency-category labels and
+lens has no fixed field for them.
 
 ``Logger.log_metrics`` fans a step out as several dicts under different
 prefixes, and a key is only reachable from the prefix its own dict carries — so
-the field maps here are per-prefix, and adding a candidate key means checking
-where that dict is actually logged.
+only the prefixes the efficiency dict actually arrives under are teed.
 """
 
 from __future__ import annotations
 
-import inspect
 import logging
 import weakref
 from typing import TYPE_CHECKING, Any, Mapping, Optional
@@ -51,49 +47,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Logger prefixes this module tees, and the field map to use for each. A metric
-# is only reachable from the prefix its own dict is logged under, so a candidate
-# key listed against the wrong prefix can never match — see the throughput note
-# on _PERFORMANCE_OTEL_METRIC_MAP.
+# Logger prefixes this module tees. The efficiency dict is logged under the
+# driver's train prefixes, and a key is only reachable from the prefix its own
+# dict is logged under, so looking anywhere else would be dead work per step.
 _TRAIN_PREFIXES: tuple[Optional[str], ...] = ("train", "")
-_PERFORMANCE_PREFIX = "performance"
-
-# Map raw Logger metric keys (under the "train"/"" prefix) to
-# ``record_rl_metrics`` gauge fields. The first present candidate key wins.
-# Best-effort: unmatched keys and non-scalar values are silently skipped.
-# Fields not yet accepted by the installed nemo-lens ``record_rl_metrics``
-# are dropped at tee time so one unknown kwarg cannot abort the whole batch.
-#
-# Every candidate here is a key some algorithm actually logs -- speculative
-# aliases are worse than no alias, because a gauge that lists three plausible
-# names and matches none looks wired and reports nothing. The lens field name
-# and the NeMo-RL key differ for most rows, which is why this map exists at all;
-# renaming the keys instead would break every existing WandB/TensorBoard
-# dashboard, since these are the same names those sinks receive.
-# ``test_every_mapped_metric_candidate_is_emitted_somewhere`` guards the drift.
-_RL_OTEL_METRIC_MAP: dict[str, tuple[str, ...]] = {
-    "reward_mean": ("reward",),
-    # NeMo-RL logs the raw KL under a key named for the penalty: the value is
-    # divided back out by the coefficient (see GRPO's loss metrics), so it is
-    # the divergence, not the penalty term.
-    "kl_divergence": ("kl_penalty",),
-    "policy_loss": ("loss",),
-    "value_loss": ("critic/loss",),
-    "entropy": ("approx_entropy",),
-    "response_length_mean": ("mean_gen_tokens_per_sample",),
-    "grad_norm": ("grad_norm",),
-    "learning_rate": ("lr",),
-}
-
-# Same shape, for the dict ``print_performance_metrics`` returns. Throughput is
-# logged under its own "performance" prefix rather than with the train scalars,
-# so it needs its own entry here — listing it above would never match. Only the
-# job-wide ``tokens_per_sec`` is a candidate: the per-GPU rates alongside it
-# would land in the same gauge at 1/N of the value, and rl.tokens_per_sec is
-# documented as a job-wide rate.
-_PERFORMANCE_OTEL_METRIC_MAP: dict[str, tuple[str, ...]] = {
-    "tokens_per_sec": ("tokens_per_sec",),
-}
 
 
 def _scalar(value: Any) -> Optional[float]:
@@ -102,36 +59,6 @@ def _scalar(value: Any) -> Optional[float]:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
-
-
-def map_rl_metrics(
-    metrics: dict[str, Any],
-    field_map: Optional[Mapping[str, tuple[str, ...]]] = None,
-) -> dict[str, float]:
-    """Extract the ``record_rl_metrics`` kwargs present in a raw metrics dict.
-
-    Pure function (no OTel side effects) so it is trivially unit-testable.
-
-    Args:
-        metrics: Raw Logger metrics dict for one step.
-        field_map: ``{lens field: candidate keys}``. Defaults to the train-scalar
-            map; pass :data:`_PERFORMANCE_OTEL_METRIC_MAP` for the performance
-            dict.
-
-    Returns:
-        ``{lens field: value}`` for every field with a usable scalar present.
-    """
-    if field_map is None:
-        field_map = _RL_OTEL_METRIC_MAP
-    kwargs: dict[str, float] = {}
-    for field, candidates in field_map.items():
-        for key in candidates:
-            value = _scalar(metrics.get(key))
-            if value is None:
-                continue
-            kwargs[field] = value
-            break
-    return kwargs
 
 
 # One dimensioned gauge rather than an instrument per category, so adding a
@@ -190,9 +117,9 @@ def warn_once(key: str, message: str) -> None:
     """Warn with a traceback the first time *key* fails, then stay quiet.
 
     Telemetry failures are typically per-step and deterministic -- a broken
-    instrument or a lens signature mismatch fails identically on every step --
-    so warning each time would put thousands of identical tracebacks in a run's
-    log while telling the reader nothing the first one did not. Warning level
+    instrument fails identically on every step -- so warning each time would put
+    thousands of identical tracebacks in a run's log while telling the reader
+    nothing the first one did not. Warning level
     once, so a permanently dead sink is visible at default verbosity; debug
     afterwards, so the repetition is still recoverable when someone is looking
     for it.
@@ -336,20 +263,16 @@ def _tee_efficiency_metrics(meter: Meter, metrics: dict[str, Any]) -> None:
 
 
 def tee_rl_metrics_to_otel(metrics: dict[str, Any], prefix: Optional[str]) -> None:
-    """Mirror standard RL scalar metrics into OTel (no-op unless exporting).
+    """Mirror the async efficiency durations into OTel (no-op unless exporting).
 
-    Only the driver's per-step ``train`` scalars, the ``efficiency/*`` durations
-    logged alongside them, and the ``performance`` throughput dict are teed. The
-    OTel instruments are touched only when telemetry is actively exporting;
-    everything else short-circuits to a no-op. The scalars additionally require
-    nemo-lens to be installed, while the ``efficiency/*`` durations are emitted
-    from instruments owned here and so need only the meter.
+    Only the ``efficiency/*`` durations logged alongside the driver's per-step
+    ``train`` scalars are teed. The OTel instruments are touched only when
+    telemetry is actively exporting; everything else short-circuits to a no-op.
 
     Never raises. ``Logger.log_metrics`` calls this unguarded on every step, so
-    the guarantee has to live here: the two emit paths below have their own
-    handlers, and this one covers everything around them -- reading the handle,
-    importing lens, inspecting its signature -- so no shape of telemetry failure
-    can reach a training step.
+    the guarantee has to live here: the emit path below has its own handler, and
+    this one covers everything around it -- reading the handle, dispatching on
+    the prefix -- so no shape of telemetry failure can reach a training step.
     """
     try:
         _tee_rl_metrics_to_otel(metrics, prefix)
@@ -359,41 +282,14 @@ def tee_rl_metrics_to_otel(metrics: dict[str, Any], prefix: Optional[str]) -> No
 
 def _tee_rl_metrics_to_otel(metrics: dict[str, Any], prefix: Optional[str]) -> None:
     """Body of :func:`tee_rl_metrics_to_otel`, inside its exception guard."""
-    is_train = prefix in _TRAIN_PREFIXES
-    if is_train:
-        field_map = _RL_OTEL_METRIC_MAP
-    elif prefix == _PERFORMANCE_PREFIX:
-        field_map = _PERFORMANCE_OTEL_METRIC_MAP
-    else:
+    if prefix not in _TRAIN_PREFIXES:
         return
     telemetry = get_telemetry_handle()
     if telemetry is None or not telemetry.is_exporting:
         return
 
-    # Before the lens tee below, which returns early on an empty kwargs match:
-    # the efficiency dict shares no keys with _RL_OTEL_METRIC_MAP, so it would
-    # never reach this point otherwise.
-    if is_train:
-        try:
-            _tee_efficiency_metrics(telemetry.meter, metrics)
-        except Exception:
-            # Broad by intent: observability must not break a training step.
-            warn_once("efficiency", "failed to tee efficiency metrics")
-
-    from nemo.lens.instruments.rl import record_rl_metrics
-
-    kwargs = map_rl_metrics(metrics, field_map)
-    if not kwargs:
-        return
-    # Drop fields the installed lens build does not accept yet (e.g. grad_norm
-    # before the matching instruments land). Passing them as **kwargs raises
-    # TypeError and — if unfiltered — would skip the whole tee batch.
-    accepted = set(inspect.signature(record_rl_metrics).parameters) - {"meter"}
-    kwargs = {k: v for k, v in kwargs.items() if k in accepted}
-    if not kwargs:
-        return
     try:
-        record_rl_metrics(telemetry.meter, **kwargs)
+        _tee_efficiency_metrics(telemetry.meter, metrics)
     except Exception:
-        # See the efficiency handler above on breadth.
-        warn_once("record_rl_metrics", "nemo-lens: failed to tee RL metrics")
+        # Broad by intent: observability must not break a training step.
+        warn_once("efficiency", "failed to tee efficiency metrics")

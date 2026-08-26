@@ -26,7 +26,7 @@ safe to import unconditionally from the algorithm ``MasterConfig`` classes.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -61,10 +61,10 @@ class TelemetryConfig(BaseModel, extra="allow"):
     and the metrics logger); this governs the Ray worker ranks. nemo-lens owns
     the strategy registry, so the driver re-checks this name against it."""
 
-    export_rank: int = Field(default=-1, ge=-1)
+    export_rank: Annotated[int, Field(ge=-1)] = -1
     """For ``single_rank``: which rank exports (``-1`` = last rank)."""
 
-    export_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+    export_sample_rate: Annotated[float, Field(ge=0.0, le=1.0)] = 1.0
     """For ``sampled``: fraction of worker ranks that export, in ``[0.0, 1.0]``.
     Also the sampling rate used by the span sampler when ``sampler_enabled`` is
     true. ``1.0`` means every rank considered by the strategy exports."""
