@@ -115,7 +115,7 @@ _DEFAULT_GROUP_BUCKET: Mapping[str, Bucket] = {
 #
 # Two wall-clock categories stay Timer-only. ``idle/validation`` wraps
 # ``validate()``, which is already accounted as ``overhead``: its
-# ``rl.grpo.total_validation_time`` umbrella wraps the generate calls in
+# ``rl.grpo.evaluate`` umbrella wraps the generate calls in
 # :func:`bucket_scope`, so on the sync rollout path the ``rl.vllm.generate``
 # spans inside it carry ``overhead``. A bucketed span over the same interval
 # would be counted a second time by a rollup that sums durations by

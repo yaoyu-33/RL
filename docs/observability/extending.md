@@ -116,7 +116,7 @@ if telemetry is not None:
 
 | Kind | Convention | Example |
 |---|---|---|
-| Span name | `rl.<algorithm>.<phase>`, matching the block's `Timer` key | `rl.grpo.generation` |
+| Span name | `rl.<algorithm>.<phase>`, matching the block's `Timer` key (the two umbrella spans excepted — see [span groups](span-groups.md#per-algorithm-span-names)) | `rl.grpo.generation` |
 | Span tag | `rl.<attr>` categorical | `rl.iteration`, `rl.backend` |
 | Resource attribute | `rl.<attr>` / shared `dl.<attr>` | `rl.model`, `dl.tensor_parallel.size` |
 | Metric name | `rl.<subsystem>.<metric>` (application scope) | `rl.efficiency.seconds` |

@@ -2981,7 +2981,7 @@ def grpo_train(
                 timer.time("total_step_time"),
                 managed_span(
                     RLSpanGroup.STEP,
-                    "rl.grpo.total_step_time",
+                    "rl.grpo.step",
                     tracer=_tracer,
                     **{"rl.iteration": total_steps + 1, "rl.epoch": current_epoch + 1},
                 ),
@@ -4044,7 +4044,7 @@ def validate(
         timer.time("total_validation_time"),
         managed_span(
             RLSpanGroup.EVALUATE,
-            "rl.grpo.total_validation_time",
+            "rl.grpo.evaluate",
             tracer=_tracer,
             **{"rl.step": step},
         ),
@@ -4838,7 +4838,7 @@ def async_grpo_train(
                 timer.time("total_step_time"),
                 managed_span(
                     RLSpanGroup.STEP,
-                    "rl.grpo.total_step_time",
+                    "rl.grpo.step",
                     tracer=_tracer,
                     **{"rl.iteration": step + 1},
                 ),

@@ -1319,7 +1319,7 @@ def ppo_train(
                 timer.time("total_step_time"),
                 managed_span(
                     RLSpanGroup.STEP,
-                    "rl.ppo.total_step_time",
+                    "rl.ppo.step",
                     tracer=_tracer,
                     **{"rl.iteration": total_steps + 1, "rl.epoch": current_epoch + 1},
                 ),
@@ -3119,7 +3119,7 @@ def validate(
         timer.time("total_validation_time"),
         managed_span(
             RLSpanGroup.EVALUATE,
-            "rl.ppo.total_validation_time",
+            "rl.ppo.evaluate",
             tracer=_tracer,
         ),
         # Scored-and-discarded generation: overhead, not goodput. See the same

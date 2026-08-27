@@ -37,7 +37,7 @@ Not yet wired:
 | SGLang, TRT-LLM and Megatron generation workers | no `init_telemetry_worker`, no generation spans — only vLLM is instrumented |
 | `grpo_sync.py`, `single_controller.py` | no spans at all; `examples/run_grpo_single_controller.py` never calls `init_telemetry_driver`, so that entrypoint emits no telemetry |
 | `run_vlm_grpo.py`, `run_grpo_sliding_puzzle.py`, `run_xtoken_off_policy_distillation.py`, `run_eval.py` | no `init_telemetry_driver`, so a `telemetry:` block in those configs parses and the run succeeds while emitting nothing, driver *and* worker |
-| `VllmGeneration.generate_async` | no `rl.vllm.generate` span, so async rollouts and async validation show `rl.grpo.generation` / `rl.grpo.total_validation_time` with no generate breakdown inside |
+| `VllmGeneration.generate_async` | no `rl.vllm.generate` span, so async rollouts and async validation show `rl.grpo.generation` / `rl.grpo.evaluate` with no generate breakdown inside |
 | `SyncRolloutActor` | the sync data-plane counterpart of the collector; no `init_telemetry_worker`, no rollout spans |
 | Worker `shutdown()` on non-async trainers | only `async_grpo_train` calls `policy.shutdown()` / `policy_generation.shutdown()`; elsewhere Ray reaps the actors, so the worker's final flush never runs and its telemetry depends on the periodic export |
 | Trace context into ranked workers | policy/value/vLLM worker spans stay separate traces (see above) |

@@ -430,7 +430,7 @@ def validate_one_dataset(
         timer.time("total_validation_time"),
         managed_span(
             RLSpanGroup.EVALUATE,
-            "rl.dpo.total_validation_time",
+            "rl.dpo.evaluate",
             tracer=_tracer,
             **{"rl.step": step},
         ),
@@ -612,7 +612,7 @@ def dpo_train(
                 timer.time("total_step_time"),
                 managed_span(
                     RLSpanGroup.STEP,
-                    "rl.dpo.total_step_time",
+                    "rl.dpo.step",
                     tracer=_tracer,
                     **{"rl.iteration": total_steps + 1, "rl.epoch": current_epoch + 1},
                 ),
