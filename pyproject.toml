@@ -77,7 +77,7 @@ dependencies = [
   # newest PyPI release so a dropped pin fails to resolve instead of silently
   # falling back to 0.1.0.
   "nemo-lens[sdk]>=0.2.0",
-  "nvidia-cudnn-cu13==9.20.0.48; sys_platform != 'darwin'",                                                   # for transformer-engine no build isolation
+  "nvidia-cudnn-cu13==9.20.0.48; sys_platform != 'darwin'", # for transformer-engine no build isolation
   # tilelang — replacement Triton kernel mamba-ssm requires when
   # Triton >= 3.4.0 on Hopper, see github.com/state-spaces/mamba#640.
   # Without this, qwen3.5 / nano-v3 / moonlight megatron recipes
