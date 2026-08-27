@@ -170,6 +170,6 @@ For a pure metrics-tee change, `map_efficiency_seconds` in `nemo_rl/telemetry/me
 
 - Inside a tight inner loop (per-token) — even a gated `managed_span`'s frozenset lookup adds up.
 - On high-cardinality attributes (raw prompts, tensor shapes) — cardinality explosion at the backend.
-- As a replacement for logging — structured logs belong in logs (correlate via the log bridge, `NEMO_RL_OTEL_LOGS_ENABLED=1`).
+- As a replacement for logging — structured logs belong in logs (correlate via the log bridge, `telemetry.logs_enabled: true`).
 
 When in doubt, start with a coarse span at the boundary of a subsystem, not a fine-grained one at every internal call.

@@ -78,7 +78,7 @@ Each span belongs to a **span group** that controls whether it is emitted at run
 
 - **Traces**: any OTLP-compatible backend (Jaeger, Grafana Tempo, an OpenTelemetry Collector, ...) via OTLP.
 - **Metrics**: the `rl.efficiency.*` async accounting teed from the driver's metrics logger, plus the vLLM `gen_ai.*` series — see [Metrics](metrics.md).
-- **Logs** (optional): via the OTel log bridge when `NEMO_RL_OTEL_LOGS_ENABLED=1` — correlates Python `logging` records with the active span's trace ID.
+- **Logs** (optional): via the OTel log bridge when `telemetry.logs_enabled` is true — correlates Python `logging` records with the active span's trace ID.
 
 By default, only **one rank** exports (`single_rank`, last rank). The driver always exports (it hosts the training loop and the metrics logger). See [Configuration — Export strategy](configuration.md#export-strategy).
 

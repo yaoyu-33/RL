@@ -6,7 +6,7 @@ Generation is where most of an RL step's wall-clock goes, so NeMo-RL instruments
 |---|---|---|
 | What | `rl.vllm.generate` / `rl.vllm.generate_text` spans + token/latency metrics, emitted by NeMo-RL around the vLLM call | vLLM's own internal engine spans (scheduling, prefill/decode, ...) |
 | Where | driver, `nemo_rl/models/generation/vllm/vllm_generation.py` | vLLM engine, enabled in `vllm_worker.py` |
-| Enabled by | `generation` span group (on by default in `per_step`/`all`) | opt-in: `NEMO_RL_OTEL_VLLM_NATIVE_TRACING=1` |
+| Enabled by | `generation` span group (on by default in `per_step`/`all`) | opt-in: `telemetry.vllm_native_tracing: true` |
 | Transport | rides the normal lens OTLP path (`http/protobuf` OK) | **gRPC-only** (needs an OTLP/gRPC endpoint / collector) |
 | Correlation | nested under the rollout span (parent-child) | via shared `run_id` / resource attributes (not parent-child) |
 
@@ -20,10 +20,17 @@ This covers the synchronous rollout path only. Async runs drive generation throu
 
 ## Layer 2 — vLLM native OTLP tracing (opt-in)
 
-vLLM can emit its own OpenTelemetry spans for the engine internals. Enable it with:
+vLLM can emit its own OpenTelemetry spans for the engine internals. Enable it in your run config:
+
+```yaml
+telemetry:
+  enabled: true
+  vllm_native_tracing: true
+```
+
+and point the exporter at a gRPC endpoint:
 
 ```bash
-export NEMO_RL_OTEL_VLLM_NATIVE_TRACING=1
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://<collector-host>:4317   # gRPC!
 ```
 

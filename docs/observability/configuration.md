@@ -43,7 +43,7 @@ These variables are a transport, not a second configuration interface. They are 
 | `NEMO_RL_OTEL_RUN_ID` | Correlates the driver and every worker to one run. Generated from `SLURM_JOB_ID` or a random hex string when unset. |
 | `NEMO_RL_OTEL_USER_ID` | Optional user/team label, read by lens. |
 
-The projection uses `os.environ.setdefault`, so a variable already present in the environment wins over the YAML value. That is deliberate for the two above, but setting the others by hand splits a run's configuration between a file and a shell with nothing recording which half came from where — the resolved settings are logged once at init for exactly this reason.
+The projection uses `os.environ.setdefault`, so a variable already present in the environment wins over the YAML value. That is deliberate for the two above, which a job scheduler supplies. For every other setting, prefer the config: a NeMo-RL toggle set in a shell leaves no trace of who set it or why, and splits a run's configuration between a file and an environment with nothing recording which half came from where. The resolved settings are logged once at init for exactly this reason, and a hydra-style `++telemetry.<field>=<value>` override covers the one-off case without leaving the config record.
 
 ## Standard OTel SDK variables
 
@@ -105,12 +105,13 @@ Attribute construction is best-effort: a missing config key simply omits that at
 
 ## Typical configurations
 
+Each example puts the NeMo-RL settings in the config and only the destination in the environment. The `++` form is a hydra-style CLI override: it is applied to the config and echoed into the run's log, so a one-off stays as traceable as an edit to the YAML.
+
 ### Console exporter (no backend)
 
 ```bash
-export NEMO_RL_OTEL_ENABLED=1
-export NEMO_RL_OTEL_EXPORTER=console
-uv run examples/run_grpo.py --config examples/configs/grpo_math_1B.yaml
+uv run examples/run_grpo.py --config examples/configs/grpo_math_1B.yaml \
+  ++telemetry.enabled=true ++telemetry.exporter=console
 ```
 
 Spans and metrics print to stdout — a quick dry run with no backend to stand up.
@@ -118,20 +119,24 @@ Spans and metrics print to stdout — a quick dry run with no backend to stand u
 ### Direct to an OTLP backend (http/protobuf)
 
 ```bash
-export NEMO_RL_OTEL_ENABLED=1
 export OTEL_EXPORTER_OTLP_ENDPOINT=https://<your-otlp-endpoint>:443
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_EXPORTER_OTLP_HEADERS="<header>=<value>"   # any auth headers your backend requires
-uv run examples/run_grpo.py --config examples/configs/grpo_math_1B.yaml
+uv run examples/run_grpo.py --config examples/configs/grpo_math_1B.yaml \
+  ++telemetry.enabled=true
 ```
 
 See [Observability Stack](observability-stack.md) for the full backend-export setup.
 
 ### Per-step granularity
 
+```yaml
+telemetry:
+  enabled: true
+  span_groups: per_step
+```
+
 ```bash
-export NEMO_RL_OTEL_ENABLED=1
-export NEMO_RL_OTEL_SPAN_GROUPS=per_step
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 ```
 

@@ -1,6 +1,6 @@
 # Span Groups
 
-Span granularity in NeMo-RL is controlled by `NEMO_RL_OTEL_SPAN_GROUPS` (or `span_groups` in the `telemetry:` block). The spec accepts a preset keyword, a comma-separated list of individual group names, or a mix (e.g. `default,generation,reward`).
+Span granularity in NeMo-RL is controlled by `span_groups` in the [`telemetry:` config block](configuration.md). The spec accepts a preset keyword, a comma-separated list of individual group names, or a mix (e.g. `default,generation,reward`).
 
 For the general span-group mechanism — how gating works, why a disabled group costs ~nothing — see [lens: span groups](https://github.com/NVIDIA-NeMo/Lens). This page covers NeMo-RL's groups and the per-algorithm span hierarchy.
 
@@ -44,18 +44,21 @@ Defined in `nemo_rl/telemetry/span_groups.py`. Extends lens's base `SpanGroup` w
 
 ## Examples
 
-```bash
-# Coarse spans only — default
-NEMO_RL_OTEL_SPAN_GROUPS=default
+```yaml
+telemetry:
+  enabled: true
 
-# Per-step traces (rollout / generation / reward / advantage / policy update)
-NEMO_RL_OTEL_SPAN_GROUPS=per_step
+  # Coarse spans only — default
+  span_groups: default
 
-# Coarse job trace + generation spans only
-NEMO_RL_OTEL_SPAN_GROUPS=default,generation
+  # Per-step traces (rollout / generation / reward / advantage / policy update)
+  # span_groups: per_step
 
-# Everything
-NEMO_RL_OTEL_SPAN_GROUPS=all
+  # Coarse job trace + generation spans only
+  # span_groups: default,generation
+
+  # Everything
+  # span_groups: all
 ```
 
 ## Per-algorithm span names
@@ -328,7 +331,7 @@ Stable-for-the-run values, set once at init and attached to every span/metric: `
 
 | Span groups | Relative cost | Recommendation |
 |---|---|---|
-| Disabled (`NEMO_RL_OTEL_ENABLED=0`) | None | Default for smoke tests |
+| Disabled (`telemetry.enabled: false`) | None | The default |
 | `default` | Lowest | Safe for all production runs |
 | `per_step` | Moderate | Per-step profiling; each step is its own trace |
 | `all` | Highest | Development / deep debugging |
