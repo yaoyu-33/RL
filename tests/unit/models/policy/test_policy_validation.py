@@ -171,6 +171,25 @@ def create_megatron_config(
     }
 
 
+@patch("nemo_rl.models.policy.lm_policy.RayWorkerGroup")
+def test_nvfp4_pertoken_rejects_dtensor_training_backend(
+    mock_ray_worker_group,
+    tiny_llama_model_path,
+):
+    config = create_dtensor_config(tiny_llama_model_path, tp=1)
+    config["generation"]["backend"] = "vllm"
+    config["generation"]["nvfp4_pertoken_rollout"] = {"enabled": True}
+
+    with pytest.raises(ValueError, match="requires the Megatron training backend"):
+        Policy(
+            cluster=create_mock_cluster(world_size=1),
+            config=config,
+            tokenizer=create_mock_tokenizer(),
+        )
+
+    mock_ray_worker_group.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "world_size,tp,cp,should_pass,expected_error_type,description",
     [
