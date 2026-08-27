@@ -785,7 +785,7 @@ def distillation_train(
                 timer.time("total_step_time"),
                 managed_span(
                     RLSpanGroup.STEP,
-                    "rl.distillation.step",
+                    "rl.distillation.total_step_time",
                     tracer=_tracer,
                     **{"rl.iteration": total_steps + 1, "rl.epoch": current_epoch + 1},
                 ),
@@ -828,7 +828,7 @@ def distillation_train(
                     timer.time("generation"),
                     managed_span(
                         RLSpanGroup.ROLLOUT,
-                        "rl.distillation.collect_rollouts",
+                        "rl.distillation.generation",
                         tracer=_tracer,
                     ),
                 ):
@@ -960,7 +960,7 @@ def distillation_train(
                     timer.time("policy_training"),
                     managed_span(
                         RLSpanGroup.POLICY_UPDATE,
-                        "rl.distillation.policy_update",
+                        "rl.distillation.policy_training",
                         tracer=_tracer,
                         **{"rl.iteration": total_steps + 1},
                     ),
@@ -1092,7 +1092,7 @@ def distillation_train(
                         timer.time("checkpointing"),
                         managed_span(
                             RLSpanGroup.CHECKPOINT,
-                            "rl.distillation.save_checkpoint",
+                            "rl.distillation.checkpointing",
                             tracer=_tracer,
                         ),
                     ):
@@ -1254,7 +1254,7 @@ def validate(
         timer.time("total_validation_time"),
         managed_span(
             RLSpanGroup.EVALUATE,
-            "rl.distillation.evaluate",
+            "rl.distillation.total_validation_time",
             tracer=_tracer,
             **{"rl.step": step},
         ),

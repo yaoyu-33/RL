@@ -289,7 +289,7 @@ def validate(
         timer.time("total_validation_time"),
         managed_span(
             RLSpanGroup.EVALUATE,
-            "rl.sft.evaluate",
+            "rl.sft.total_validation_time",
             tracer=_tracer,
             **{"rl.step": step},
         ),
@@ -463,7 +463,7 @@ def sft_train(
                 timer.time("total_step_time"),
                 managed_span(
                     RLSpanGroup.STEP,
-                    "rl.sft.step",
+                    "rl.sft.total_step_time",
                     tracer=_tracer,
                     **{"rl.iteration": total_steps + 1, "rl.epoch": current_epoch + 1},
                 ),
@@ -510,7 +510,7 @@ def sft_train(
                     timer.time("policy_training"),
                     managed_span(
                         RLSpanGroup.POLICY_UPDATE,
-                        "rl.sft.policy_update",
+                        "rl.sft.policy_training",
                         tracer=_tracer,
                         **{"rl.iteration": total_steps + 1},
                     ),
@@ -624,7 +624,7 @@ def sft_train(
                         timer.time("checkpointing"),
                         managed_span(
                             RLSpanGroup.CHECKPOINT,
-                            "rl.sft.save_checkpoint",
+                            "rl.sft.checkpointing",
                             tracer=_tracer,
                         ),
                     ):

@@ -60,18 +60,18 @@ NEMO_RL_OTEL_SPAN_GROUPS=all
 
 ## Per-algorithm span names
 
-Span names follow `rl.<algorithm>.<operation>`. The controlling group is shown for each; a span is only emitted when its group is enabled *and* the rank is exporting.
+Span names follow `rl.<algorithm>.<phase>`, where `<phase>` is the `Timer` key the same block records — so a span and the `timing/train/<phase>` metric measuring it carry one name rather than two, and correlating a slow span with its timing series needs no mapping. The `Timer` key is the authority: it is pre-existing and already published as a metric name, so a new span takes its name from the timer rather than the reverse. The controlling group is shown for each; a span is only emitted when its group is enabled *and* the rank is exporting.
 
 | Algorithm | Spans |
 |---|---|
-| **GRPO** (sync + async) | `rl.grpo.job`, `rl.grpo.step`, `rl.grpo.data_processing`, `rl.grpo.collect_rollouts`, `rl.grpo.compute_rewards`, `rl.grpo.compute_logprobs`, `rl.grpo.compute_advantages`, `rl.grpo.policy_update`, `rl.grpo.save_checkpoint`, `rl.grpo.evaluate` |
+| **GRPO** (sync + async) | `rl.grpo.job`, `rl.grpo.total_step_time`, `rl.grpo.data_processing`, `rl.grpo.generation`, `rl.grpo.reward_calculation`, `rl.grpo.policy_and_reference_logprobs`, `rl.grpo.advantage_calculation`, `rl.grpo.policy_training`, `rl.grpo.checkpointing`, `rl.grpo.total_validation_time` |
 | **GRPO** (async only) | `rl.idle.buffer_starvation`, `rl.idle.refit_bubble` (driver) and `rl.idle.refit_event_wait`, `rl.idle.generation_limit_pause` (collector actor) — `efficiency` group; named after the `Timer` category, not the algorithm |
-| **GRPO** (async only) | `rl.grpo.collect_rollouts` — `rollout` group, emitted by the collector actor, one span per rollout batch |
-| **PPO** | `rl.ppo.job`, `rl.ppo.step`, `rl.ppo.data_processing`, `rl.ppo.collect_rollouts`, `rl.ppo.compute_rewards`, `rl.ppo.compute_logprobs`, `rl.ppo.compute_advantages`, `rl.ppo.policy_update`, `rl.ppo.value_update`, `rl.ppo.save_checkpoint`, `rl.ppo.evaluate` |
-| **SFT** | `rl.sft.job`, `rl.sft.step`, `rl.sft.data_processing`, `rl.sft.policy_update`, `rl.sft.save_checkpoint`, `rl.sft.evaluate` |
-| **DPO** | `rl.dpo.job`, `rl.dpo.step`, `rl.dpo.policy_update`, `rl.dpo.save_checkpoint`, `rl.dpo.evaluate` |
-| **RM** | `rl.rm.job`, `rl.rm.step`, `rl.rm.save_checkpoint`, `rl.rm.evaluate` |
-| **Distillation** | `rl.distillation.job`, `rl.distillation.step`, `rl.distillation.data_processing`, `rl.distillation.collect_rollouts`, `rl.distillation.teacher_logprob_inference`, `rl.distillation.policy_update`, `rl.distillation.save_checkpoint`, `rl.distillation.evaluate` |
+| **GRPO** (async only) | `rl.grpo.generation` — `rollout` group, emitted by the collector actor, one span per rollout batch |
+| **PPO** | `rl.ppo.job`, `rl.ppo.total_step_time`, `rl.ppo.data_processing`, `rl.ppo.generation`, `rl.ppo.reward_calculation`, `rl.ppo.policy_and_reference_logprobs`, `rl.ppo.advantage_calculation`, `rl.ppo.policy_training`, `rl.ppo.value_training`, `rl.ppo.checkpointing`, `rl.ppo.total_validation_time` |
+| **SFT** | `rl.sft.job`, `rl.sft.total_step_time`, `rl.sft.data_processing`, `rl.sft.policy_training`, `rl.sft.checkpointing`, `rl.sft.total_validation_time` |
+| **DPO** | `rl.dpo.job`, `rl.dpo.total_step_time`, `rl.dpo.policy_training`, `rl.dpo.checkpointing`, `rl.dpo.total_validation_time` |
+| **RM** | `rl.rm.job`, `rl.rm.total_step_time`, `rl.rm.checkpointing`, `rl.rm.total_validation_time` |
+| **Distillation** | `rl.distillation.job`, `rl.distillation.total_step_time`, `rl.distillation.data_processing`, `rl.distillation.generation`, `rl.distillation.teacher_logprob_inference`, `rl.distillation.policy_training`, `rl.distillation.checkpointing`, `rl.distillation.total_validation_time` |
 | **vLLM** (driver-side) | `rl.vllm.generate`, `rl.vllm.generate_text` — `generation` group; nested under the active rollout span |
 | **vLLM** (worker-side) | `rl.vllm.load_model` — `model_init` group; a root span in the generation worker's process, since Ray carries no trace context into `__init__` |
 
@@ -143,7 +143,7 @@ defaulting to `overhead`. Each span also carries
 `rl.efficiency.category` with the raw label, so idle time can be grouped by
 cause without parsing the span name.
 
-Two driver-side phases are wired today, both children of `rl.grpo.step`:
+Two driver-side phases are wired today, both children of `rl.grpo.total_step_time`:
 
 | Span | Category | Bucket | What the driver is waiting on |
 |---|---|---|---|
@@ -210,8 +210,8 @@ Both run in the batch-worker threads, so they are genuinely *thread-seconds* —
 several workers accumulate at once and the total can exceed the wall time it
 happened in. `idle/buffer_full_backoff` also has no clean block to wrap: it is
 recorded as a precomputed duration spanning a retry loop. `wasted/failed_trajectory`
-covers the same window as the enclosing `rl.grpo.collect_rollouts` span, so a
-span there would duplicate an existing interval. `init/total` is likewise still
+covers the same window as the enclosing `rl.grpo.generation` span, so a span
+there would duplicate an existing interval. `init/total` is likewise still
 `Timer`-only — it runs before the per-step loop, so it fills no step-level gap.
 
 So goodput on async runs covers driver idle, but not collector-side idle or
@@ -235,8 +235,8 @@ since a kill runs no `atexit` handler. That call stops the collection loop and
 waits (bounded) for in-flight batch workers first: the shutdown is terminal, so
 a still-running thread would keep opening spans against a dead processor.
 
-Each batch worker opens one `rl.grpo.collect_rollouts` span — the same name the
-sync path uses on the driver, so the two modes read alike — carrying
+Each batch worker opens one `rl.grpo.generation` span — the same name the sync
+path uses on the driver, so the two modes read alike — carrying
 `rl.weight_version`, `rl.target_weight_version`, `rl.num_generations_per_prompt`
 and `rl.num_prompt_groups`. The last one is the batch width: a gap-filling batch
 covers a fraction of a full one, so without it a short span looks like an
@@ -257,14 +257,14 @@ process: OTel context is a `ContextVar`, and `threading.Thread` inherits none.
 The result is a single trace per run:
 
 ```
-rl.grpo.job                                   (driver)
-├── rl.grpo.step  (iteration 1)               (driver)
+rl.grpo.job                                     (driver)
+├── rl.grpo.total_step_time  (iteration 1)      (driver)
 │   ├── rl.idle.buffer_starvation
-│   └── rl.grpo.policy_update
-├── rl.grpo.collect_rollouts  weight=7        (collector, thread A)
-├── rl.idle.generation_limit_pause            (collector, loop thread)
-├── rl.grpo.collect_rollouts  weight=8        (collector, thread B)
-└── rl.grpo.step  (iteration 2)               (driver)
+│   └── rl.grpo.policy_training
+├── rl.grpo.generation  weight=7                (collector, thread A)
+├── rl.idle.generation_limit_pause              (collector, loop thread)
+├── rl.grpo.generation  weight=8                (collector, thread B)
+└── rl.grpo.total_step_time  (iteration 2)      (driver)
 ```
 
 **This requires the `job` group to be enabled.** `current_trace_carrier()`
@@ -308,7 +308,7 @@ blanks today, so an empty trace is not read as a broken exporter:
 | Area | State |
 |---|---|
 | SGLang / TRT-LLM / Megatron generation workers | uninstrumented — no `init_telemetry_worker` and no generation spans; only vLLM emits `rl.vllm.*`. (Policy and value workers do initialise telemetry, so their metrics and any future spans are wired.) |
-| `VllmGeneration.generate_async` | no span, so async rollouts and async validation have no generate breakdown under `rl.grpo.collect_rollouts` / `rl.grpo.evaluate` |
+| `VllmGeneration.generate_async` | no span, so async rollouts and async validation have no generate breakdown under `rl.grpo.generation` / `rl.grpo.total_validation_time` |
 | `SyncRolloutActor` | the sync data-plane counterpart of the async collector — uninstrumented, so its rollouts produce no spans |
 | Worker flush outside async GRPO | only `async_grpo_train` calls `policy.shutdown()` / `policy_generation.shutdown()`, so on other trainers a worker's last spans depend on the periodic export rather than a flush |
 | `load_checkpoint`, `forward_backward`, `optimizer`, `reference_policy` | the groups are defined and bucketed, but no site emits them, so enabling them adds no spans |

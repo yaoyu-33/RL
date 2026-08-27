@@ -64,12 +64,12 @@ Each algorithm's `examples/run_<algo>.py` calls `init_telemetry_driver(config, a
 
 | Algorithm | Entry point | Representative spans |
 |---|---|---|
-| GRPO (sync + async) | `examples/run_grpo.py` | `rl.grpo.step`, `rl.grpo.collect_rollouts`, `rl.grpo.compute_rewards`, `rl.grpo.compute_logprobs`, `rl.grpo.compute_advantages`, `rl.grpo.policy_update` |
-| PPO | `examples/run_ppo.py` | `rl.ppo.step`, `rl.ppo.collect_rollouts`, `rl.ppo.compute_rewards`, `rl.ppo.compute_advantages`, `rl.ppo.policy_update`, `rl.ppo.value_update` |
-| SFT | `examples/run_sft.py` | `rl.sft.step`, `rl.sft.data_processing`, `rl.sft.policy_update` |
-| DPO | `examples/run_dpo.py` | `rl.dpo.step`, `rl.dpo.policy_update` |
-| RM | `examples/run_rm.py` | `rl.rm.step` |
-| Distillation | `examples/run_distillation.py` | `rl.distillation.step`, `rl.distillation.collect_rollouts`, `rl.distillation.teacher_logprob_inference`, `rl.distillation.policy_update` |
+| GRPO (sync + async) | `examples/run_grpo.py` | `rl.grpo.total_step_time`, `rl.grpo.generation`, `rl.grpo.reward_calculation`, `rl.grpo.policy_and_reference_logprobs`, `rl.grpo.advantage_calculation`, `rl.grpo.policy_training` |
+| PPO | `examples/run_ppo.py` | `rl.ppo.total_step_time`, `rl.ppo.generation`, `rl.ppo.reward_calculation`, `rl.ppo.advantage_calculation`, `rl.ppo.policy_training`, `rl.ppo.value_training` |
+| SFT | `examples/run_sft.py` | `rl.sft.total_step_time`, `rl.sft.data_processing`, `rl.sft.policy_training` |
+| DPO | `examples/run_dpo.py` | `rl.dpo.total_step_time`, `rl.dpo.policy_training` |
+| RM | `examples/run_rm.py` | `rl.rm.total_step_time` |
+| Distillation | `examples/run_distillation.py` | `rl.distillation.total_step_time`, `rl.distillation.generation`, `rl.distillation.teacher_logprob_inference`, `rl.distillation.policy_training` |
 | vLLM generation | `nemo_rl/models/generation/vllm/vllm_generation.py` | `rl.vllm.generate`, `rl.vllm.generate_text` |
 
 Each span belongs to a **span group** that controls whether it is emitted at runtime. See [Span Groups](span-groups.md) for the full per-algorithm span table.

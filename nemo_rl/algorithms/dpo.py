@@ -430,7 +430,7 @@ def validate_one_dataset(
         timer.time("total_validation_time"),
         managed_span(
             RLSpanGroup.EVALUATE,
-            "rl.dpo.evaluate",
+            "rl.dpo.total_validation_time",
             tracer=_tracer,
             **{"rl.step": step},
         ),
@@ -612,7 +612,7 @@ def dpo_train(
                 timer.time("total_step_time"),
                 managed_span(
                     RLSpanGroup.STEP,
-                    "rl.dpo.step",
+                    "rl.dpo.total_step_time",
                     tracer=_tracer,
                     **{"rl.iteration": total_steps + 1, "rl.epoch": current_epoch + 1},
                 ),
@@ -622,7 +622,7 @@ def dpo_train(
                     timer.time("policy_training"),
                     managed_span(
                         RLSpanGroup.POLICY_UPDATE,
-                        "rl.dpo.policy_update",
+                        "rl.dpo.policy_training",
                         tracer=_tracer,
                         **{"rl.iteration": total_steps + 1},
                     ),
@@ -760,7 +760,7 @@ def dpo_train(
                         timer.time("checkpointing"),
                         managed_span(
                             RLSpanGroup.CHECKPOINT,
-                            "rl.dpo.save_checkpoint",
+                            "rl.dpo.checkpointing",
                             tracer=_tracer,
                         ),
                     ):

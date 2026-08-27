@@ -115,7 +115,7 @@ _DEFAULT_GROUP_BUCKET: Mapping[str, Bucket] = {
 #
 # Two wall-clock categories stay Timer-only. ``idle/validation`` wraps
 # ``validate()``, which is already accounted as ``overhead``: its
-# ``rl.grpo.evaluate`` umbrella wraps the generate calls in
+# ``rl.grpo.total_validation_time`` umbrella wraps the generate calls in
 # :func:`bucket_scope`, so on the sync rollout path the ``rl.vllm.generate``
 # spans inside it carry ``overhead``. A bucketed span over the same interval
 # would be counted a second time by a rollup that sums durations by
@@ -135,7 +135,7 @@ _DEFAULT_GROUP_BUCKET: Mapping[str, Bucket] = {
 # ``async_utils/trajectory_collector.py``: ``idle/buffer_full_backoff`` is a
 # precomputed duration spanning a retry loop with no block to wrap, and
 # ``wasted/failed_trajectory`` covers the same window as the enclosing
-# ``rl.grpo.collect_rollouts`` span.
+# ``rl.grpo.generation`` span.
 #
 # Every category below is exported as the ``rl.efficiency.seconds`` metric (see
 # ``nemo_rl/telemetry/metrics.py``); the per-entry notes say which are *also*

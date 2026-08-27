@@ -1319,7 +1319,7 @@ def ppo_train(
                 timer.time("total_step_time"),
                 managed_span(
                     RLSpanGroup.STEP,
-                    "rl.ppo.step",
+                    "rl.ppo.total_step_time",
                     tracer=_tracer,
                     **{"rl.iteration": total_steps + 1, "rl.epoch": current_epoch + 1},
                 ),
@@ -1404,7 +1404,7 @@ def ppo_train(
                     timer.time("generation"),
                     managed_span(
                         RLSpanGroup.ROLLOUT,
-                        "rl.ppo.collect_rollouts",
+                        "rl.ppo.generation",
                         tracer=_tracer,
                     ),
                 ):
@@ -1483,7 +1483,7 @@ def ppo_train(
                     timer.time("reward_calculation"),
                     managed_span(
                         RLSpanGroup.REWARD,
-                        "rl.ppo.compute_rewards",
+                        "rl.ppo.reward_calculation",
                         tracer=_tracer,
                     ),
                 ):
@@ -1564,7 +1564,7 @@ def ppo_train(
                     timer.time("policy_and_reference_logprobs"),
                     managed_span(
                         RLSpanGroup.LOGPROB,
-                        "rl.ppo.compute_logprobs",
+                        "rl.ppo.policy_and_reference_logprobs",
                         tracer=_tracer,
                     ),
                 ):
@@ -1610,7 +1610,7 @@ def ppo_train(
                     timer.time("advantage_calculation"),
                     managed_span(
                         RLSpanGroup.ADVANTAGE,
-                        "rl.ppo.compute_advantages",
+                        "rl.ppo.advantage_calculation",
                         tracer=_tracer,
                     ),
                 ):
@@ -1663,7 +1663,7 @@ def ppo_train(
                         timer.time("value_training"),
                         managed_span(
                             RLSpanGroup.POLICY_UPDATE,
-                            "rl.ppo.value_update",
+                            "rl.ppo.value_training",
                             tracer=_tracer,
                             **{"rl.iteration": total_steps + 1},
                         ),
@@ -1698,7 +1698,7 @@ def ppo_train(
                             timer.time("policy_training"),
                             managed_span(
                                 RLSpanGroup.POLICY_UPDATE,
-                                "rl.ppo.policy_update",
+                                "rl.ppo.policy_training",
                                 tracer=_tracer,
                                 **{"rl.iteration": total_steps + 1},
                             ),
@@ -1917,7 +1917,7 @@ def ppo_train(
                         timer.time("checkpointing"),
                         managed_span(
                             RLSpanGroup.CHECKPOINT,
-                            "rl.ppo.save_checkpoint",
+                            "rl.ppo.checkpointing",
                             tracer=_tracer,
                         ),
                     ):
@@ -3119,7 +3119,7 @@ def validate(
         timer.time("total_validation_time"),
         managed_span(
             RLSpanGroup.EVALUATE,
-            "rl.ppo.evaluate",
+            "rl.ppo.total_validation_time",
             tracer=_tracer,
         ),
         # Scored-and-discarded generation: overhead, not goodput. See the same

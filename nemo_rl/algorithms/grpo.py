@@ -2981,7 +2981,7 @@ def grpo_train(
                 timer.time("total_step_time"),
                 managed_span(
                     RLSpanGroup.STEP,
-                    "rl.grpo.step",
+                    "rl.grpo.total_step_time",
                     tracer=_tracer,
                     **{"rl.iteration": total_steps + 1, "rl.epoch": current_epoch + 1},
                 ),
@@ -3093,7 +3093,7 @@ def grpo_train(
                     timer.time("generation"),
                     managed_span(
                         RLSpanGroup.ROLLOUT,
-                        "rl.grpo.collect_rollouts",
+                        "rl.grpo.generation",
                         tracer=_tracer,
                         **{
                             "rl.num_generations_per_prompt": master_config.grpo.num_generations_per_prompt,
@@ -3209,7 +3209,7 @@ def grpo_train(
                 with (
                     timer.time("reward_calculation"),
                     managed_span(
-                        RLSpanGroup.REWARD, "rl.grpo.compute_rewards", tracer=_tracer
+                        RLSpanGroup.REWARD, "rl.grpo.reward_calculation", tracer=_tracer
                     ),
                 ):
                     # Extract rewards from final_batch
@@ -3401,7 +3401,9 @@ def grpo_train(
                 with (
                     timer.time("policy_and_reference_logprobs"),
                     managed_span(
-                        RLSpanGroup.LOGPROB, "rl.grpo.compute_logprobs", tracer=_tracer
+                        RLSpanGroup.LOGPROB,
+                        "rl.grpo.policy_and_reference_logprobs",
+                        tracer=_tracer,
                     ),
                 ):
                     # Custom create this logprob_data so we avoid Ray comm overheads sending unused data to workers.
@@ -3478,7 +3480,7 @@ def grpo_train(
                     timer.time("advantage_calculation"),
                     managed_span(
                         RLSpanGroup.ADVANTAGE,
-                        "rl.grpo.compute_advantages",
+                        "rl.grpo.advantage_calculation",
                         tracer=_tracer,
                     ),
                 ):
@@ -3530,7 +3532,7 @@ def grpo_train(
                     timer.time("policy_training"),
                     managed_span(
                         RLSpanGroup.POLICY_UPDATE,
-                        "rl.grpo.policy_update",
+                        "rl.grpo.policy_training",
                         tracer=_tracer,
                         **{"rl.iteration": total_steps + 1},
                     ),
@@ -3775,7 +3777,7 @@ def grpo_train(
                         timer.time("checkpointing"),
                         managed_span(
                             RLSpanGroup.CHECKPOINT,
-                            "rl.grpo.save_checkpoint",
+                            "rl.grpo.checkpointing",
                             tracer=_tracer,
                         ),
                     ):
@@ -4042,7 +4044,7 @@ def validate(
         timer.time("total_validation_time"),
         managed_span(
             RLSpanGroup.EVALUATE,
-            "rl.grpo.evaluate",
+            "rl.grpo.total_validation_time",
             tracer=_tracer,
             **{"rl.step": step},
         ),
@@ -4836,7 +4838,7 @@ def async_grpo_train(
                 timer.time("total_step_time"),
                 managed_span(
                     RLSpanGroup.STEP,
-                    "rl.grpo.step",
+                    "rl.grpo.total_step_time",
                     tracer=_tracer,
                     **{"rl.iteration": step + 1},
                 ),
@@ -5024,7 +5026,7 @@ def async_grpo_train(
                 with (
                     timer.time("reward_calculation"),
                     managed_span(
-                        RLSpanGroup.REWARD, "rl.grpo.compute_rewards", tracer=_tracer
+                        RLSpanGroup.REWARD, "rl.grpo.reward_calculation", tracer=_tracer
                     ),
                 ):
                     # Must precede prompt extraction: it reuses the same message
@@ -5136,7 +5138,9 @@ def async_grpo_train(
                 with (
                     timer.time("policy_and_reference_logprobs"),
                     managed_span(
-                        RLSpanGroup.LOGPROB, "rl.grpo.compute_logprobs", tracer=_tracer
+                        RLSpanGroup.LOGPROB,
+                        "rl.grpo.policy_and_reference_logprobs",
+                        tracer=_tracer,
                     ),
                 ):
                     if not skip_prev_logprobs:
@@ -5191,7 +5195,7 @@ def async_grpo_train(
                     timer.time("advantage_calculation"),
                     managed_span(
                         RLSpanGroup.ADVANTAGE,
-                        "rl.grpo.compute_advantages",
+                        "rl.grpo.advantage_calculation",
                         tracer=_tracer,
                     ),
                 ):
@@ -5259,7 +5263,7 @@ def async_grpo_train(
                     timer.time("policy_training"),
                     managed_span(
                         RLSpanGroup.POLICY_UPDATE,
-                        "rl.grpo.policy_update",
+                        "rl.grpo.policy_training",
                         tracer=_tracer,
                         **{"rl.iteration": step + 1},
                     ),
@@ -5569,7 +5573,7 @@ def async_grpo_train(
                         timer.time("checkpointing"),
                         managed_span(
                             RLSpanGroup.CHECKPOINT,
-                            "rl.grpo.save_checkpoint",
+                            "rl.grpo.checkpointing",
                             tracer=_tracer,
                         ),
                     ):

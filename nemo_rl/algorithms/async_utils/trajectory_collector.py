@@ -919,7 +919,7 @@ class AsyncTrajectoryCollector:
                     _collect()
 
             def _collect() -> None:
-                # The async counterpart of the driver's rl.grpo.collect_rollouts.
+                # The async counterpart of the driver's rl.grpo.generation.
                 # ROLLOUT is an umbrella group, so this carries no rl.bucket --
                 # several batch workers run concurrently, so their durations sum
                 # past wall time and cannot go into a bucket rollup. It is here
@@ -929,7 +929,7 @@ class AsyncTrajectoryCollector:
                 # would be thousands of overlapping spans per step.
                 with managed_span(
                     RLSpanGroup.ROLLOUT,
-                    "rl.grpo.collect_rollouts",
+                    "rl.grpo.generation",
                     tracer=self._tracer,
                     **{
                         "rl.weight_version": generation_weight_version,
@@ -1180,8 +1180,8 @@ class AsyncTrajectoryCollector:
         Joins ``_live_threads`` rather than ``_inflight_threads``, and joins
         rather than polling ``is_alive``: a batch worker leaves the latter from
         inside its own ``finally``, which still sits inside the
-        ``rl.grpo.collect_rollouts`` span, so neither an empty set nor a set
-        snapshot means the spans are closed. Thread death does.
+        ``rl.grpo.generation`` span, so neither an empty set nor a set snapshot
+        means the spans are closed. Thread death does.
 
         The loop is woken before it is joined, since the refit and
         generation-limit waits each hold an open span and each is followed by a

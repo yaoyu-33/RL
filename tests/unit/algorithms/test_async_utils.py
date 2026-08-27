@@ -2217,9 +2217,9 @@ class TestAsyncTrajectoryCollector:
         """Leaving ``_inflight_threads`` does not mean the span is closed.
 
         A batch worker discards itself from the set inside its own ``finally``,
-        which still runs inside the ``rl.grpo.collect_rollouts`` span. Watching
-        the set would let the flush start while that span is still open; joining
-        the thread waits for the span to end, because thread death follows it.
+        which still runs inside the ``rl.grpo.generation`` span. Watching the set
+        would let the flush start while that span is still open; joining the
+        thread waits for the span to end, because thread death follows it.
         """
         collector = self.create_local_collector()
         collector.running = True

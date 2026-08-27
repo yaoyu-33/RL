@@ -162,7 +162,7 @@ def test_trace_carrier_reparents_spans_in_another_context():
     # Outside the parent block: nothing is active, so this would be a root.
     with remote_trace_context(carrier):
         with managed_span(
-            RLSpanGroup.ROLLOUT, "rl.grpo.collect_rollouts", tracer=handle.tracer
+            RLSpanGroup.ROLLOUT, "rl.grpo.generation", tracer=handle.tracer
         ):
             pass
     handle.shutdown()
@@ -170,7 +170,7 @@ def test_trace_carrier_reparents_spans_in_another_context():
     child = next(
         span
         for span in exporter.get_finished_spans()
-        if span.name == "rl.grpo.collect_rollouts"
+        if span.name == "rl.grpo.generation"
     )
     assert child.parent is not None
     assert child.parent.span_id == parent_ctx.span_id
@@ -185,7 +185,7 @@ def test_span_is_a_root_without_a_carrier():
     assert carrier == {}
     with remote_trace_context(carrier):
         with managed_span(
-            RLSpanGroup.ROLLOUT, "rl.grpo.collect_rollouts", tracer=handle.tracer
+            RLSpanGroup.ROLLOUT, "rl.grpo.generation", tracer=handle.tracer
         ):
             pass
     handle.shutdown()
@@ -303,7 +303,9 @@ def test_managed_span_emits_when_group_enabled():
 @requires_lens
 def test_umbrella_span_has_no_bucket():
     handle, exporter = _setup("all")
-    with managed_span(RLSpanGroup.STEP, "rl.grpo.step", tracer=handle.tracer) as span:
+    with managed_span(
+        RLSpanGroup.STEP, "rl.grpo.total_step_time", tracer=handle.tracer
+    ) as span:
         assert span is not None
     handle.shutdown()
     spans = exporter.get_finished_spans()
@@ -351,7 +353,9 @@ def test_validation_generation_is_overhead_not_productive():
         return "tokens"
 
     with (
-        managed_span(RLSpanGroup.EVALUATE, "rl.grpo.evaluate", tracer=handle.tracer),
+        managed_span(
+            RLSpanGroup.EVALUATE, "rl.grpo.total_validation_time", tracer=handle.tracer
+        ),
         bucket_scope(Bucket.OVERHEAD),
     ):
         generate()
@@ -359,9 +363,9 @@ def test_validation_generation_is_overhead_not_productive():
     handle.shutdown()
 
     spans = exporter.get_finished_spans()
-    evaluate = next(s for s in spans if s.name == "rl.grpo.evaluate")
+    validation = next(s for s in spans if s.name == "rl.grpo.total_validation_time")
     validation_gen, train_gen = (s for s in spans if s.name == "rl.vllm.generate")
-    assert RL_BUCKET_ATTR not in evaluate.attributes
+    assert RL_BUCKET_ATTR not in validation.attributes
     assert validation_gen.attributes[RL_BUCKET_ATTR] == "overhead"
     assert train_gen.attributes[RL_BUCKET_ATTR] == "productive"
 
@@ -413,11 +417,13 @@ def test_explicit_bucket_wins_over_scope():
 def test_step_nests_under_job():
     handle, exporter = _setup("all")
     with managed_span(RLSpanGroup.JOB, "rl.grpo.job", tracer=handle.tracer):
-        with managed_span(RLSpanGroup.STEP, "rl.grpo.step", tracer=handle.tracer):
+        with managed_span(
+            RLSpanGroup.STEP, "rl.grpo.total_step_time", tracer=handle.tracer
+        ):
             pass
     handle.shutdown()
     spans = {s.name: s for s in exporter.get_finished_spans()}
-    assert "rl.grpo.job" in spans and "rl.grpo.step" in spans
-    step, job = spans["rl.grpo.step"], spans["rl.grpo.job"]
+    assert "rl.grpo.job" in spans and "rl.grpo.total_step_time" in spans
+    step, job = spans["rl.grpo.total_step_time"], spans["rl.grpo.job"]
     assert step.parent is not None
     assert step.parent.span_id == job.context.span_id

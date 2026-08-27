@@ -372,7 +372,7 @@ def validate_one_dataset(
         timer.time("total_validation_time"),
         managed_span(
             RLSpanGroup.EVALUATE,
-            "rl.rm.evaluate",
+            "rl.rm.total_validation_time",
             tracer=_tracer,
         ),
     ):
@@ -550,7 +550,7 @@ def rm_train(
                 timer.time("total_step_time"),
                 managed_span(
                     RLSpanGroup.STEP,
-                    "rl.rm.step",
+                    "rl.rm.total_step_time",
                     tracer=_tracer,
                     **{"rl.iteration": total_steps + 1},
                 ),
@@ -686,7 +686,7 @@ def rm_train(
                         timer.time("checkpointing"),
                         managed_span(
                             RLSpanGroup.CHECKPOINT,
-                            "rl.rm.save_checkpoint",
+                            "rl.rm.checkpointing",
                             tracer=_tracer,
                         ),
                     ):

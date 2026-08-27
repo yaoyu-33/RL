@@ -92,7 +92,7 @@ def generate(self, ...):
 For a hot path where you want minimal cost when the group is disabled:
 
 ```python
-with managed_span(RLSpanGroup.ROLLOUT, "rl.grpo.collect_rollouts",
+with managed_span(RLSpanGroup.ROLLOUT, "rl.grpo.generation",
                   **{"rl.iteration": iteration}) as span:
     result = collect()
     if span is not None:
@@ -116,7 +116,7 @@ if telemetry is not None:
 
 | Kind | Convention | Example |
 |---|---|---|
-| Span name | `rl.<algorithm>.<operation>` | `rl.grpo.collect_rollouts` |
+| Span name | `rl.<algorithm>.<phase>`, matching the block's `Timer` key | `rl.grpo.generation` |
 | Span tag | `rl.<attr>` categorical | `rl.iteration`, `rl.backend` |
 | Resource attribute | `rl.<attr>` / shared `dl.<attr>` | `rl.model`, `dl.tensor_parallel.size` |
 | Metric name | `rl.<subsystem>.<metric>` (application scope) | `rl.efficiency.seconds` |
