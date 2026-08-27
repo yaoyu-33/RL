@@ -210,6 +210,10 @@ class VllmGeneration(GenerationInterface):
         else:
             worker_builder = RayWorkerBuilder(worker_cls, config)
 
+        from nemo_rl.utils.fastokens import normalize_fastokens_env
+
+        normalize_fastokens_env()
+
         # It's necessary to set env_vars here to ensure that vllm non-leader workers also have these env_vars
         env_vars = {}
         # User-supplied per-recipe env vars (e.g. vllm_cfg.env_vars in the yaml).
