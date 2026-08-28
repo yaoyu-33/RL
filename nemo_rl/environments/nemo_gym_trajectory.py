@@ -53,11 +53,14 @@ def trajectory_to_completion(trajectory: Mapping[str, Any]) -> Completion:
             "role": "assistant" if trainable else "user",
             "content": "",
             "token_ids": torch.tensor(input_ids[start:end], dtype=torch.long),
+            "token_loss_mask": torch.full(
+                (end - start,), int(trainable), dtype=torch.long
+            ),
+            "generation_logprobs": torch.tensor(
+                logprobs[start:end] if trainable else [0.0] * (end - start),
+                dtype=torch.float32,
+            ),
         }
-        if trainable:
-            message["generation_logprobs"] = torch.tensor(
-                logprobs[start:end], dtype=torch.float32
-            )
         message_log.append(message)
         start = end
 

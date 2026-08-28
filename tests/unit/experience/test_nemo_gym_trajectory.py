@@ -1,12 +1,11 @@
 import pytest
 import torch
 
+from nemo_rl.data.llm_message_utils import batched_message_log_to_flat_message
 from nemo_rl.environments.nemo_gym_trajectory import trajectory_to_completion
-from nemo_rl.experience.interfaces import PromptGroupRecord
-from nemo_rl.experience.payload import record_to_train_batch
 
 
-def test_gym_trajectory_reaches_nemo_rl_training_batch():
+def test_gym_trajectory_reaches_nemo_rl_flat_training_tensors():
     trajectory = {
         "task_id": "arithmetic",
         "sample_id": "arithmetic:0",
@@ -21,22 +20,17 @@ def test_gym_trajectory_reaches_nemo_rl_training_batch():
     }
 
     completion = trajectory_to_completion(trajectory)
-    record = PromptGroupRecord(
-        prompt_idx=0,
-        prompt=[completion.message_log[0]],
-        extra_env_info=None,
-        metadata={"task_name": "arithmetic"},
-        completions=[completion],
-        rollout_metrics={},
+    flat, input_lengths = batched_message_log_to_flat_message(
+        [completion.message_log], pad_value_dict={"token_ids": 0}
     )
-    batch = record_to_train_batch(record, pad_value_dict={"token_ids": 0})
 
-    assert batch["input_ids"].tolist() == [[10, 11, 12, 13]]
-    assert batch["token_mask"].tolist() == [[0, 0, 1, 1]]
+    assert flat["token_ids"].tolist() == [[10, 11, 12, 13]]
+    assert flat["token_loss_mask"].tolist() == [[0, 0, 1, 1]]
     assert torch.allclose(
-        batch["generation_logprobs"], torch.tensor([[0.0, 0.0, -0.1, -0.2]])
+        flat["generation_logprobs"], torch.tensor([[0.0, 0.0, -0.1, -0.2]])
     )
-    assert batch["total_reward"].tolist() == [1.0]
+    assert input_lengths.tolist() == [4]
+    assert completion.reward == 1.0
 
 
 @pytest.mark.parametrize("field", ["input_ids", "loss_mask", "logprobs", "reward"])
