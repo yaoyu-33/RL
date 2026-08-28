@@ -7,17 +7,10 @@ from nemo_rl.environments.nemo_gym_trajectory import trajectory_to_completion
 
 def test_gym_trajectory_reaches_nemo_rl_flat_training_tensors():
     trajectory = {
-        "schema_version": 1,
-        "task_id": "arithmetic",
-        "sample_id": "arithmetic:0",
         "input_ids": [10, 11, 12, 13],
         "loss_mask": [0, 0, 1, 1],
         "logprobs": [0.0, 0.0, -0.1, -0.2],
         "reward": 1.0,
-        "messages": [
-            {"role": "user", "content": "What is 2 + 2?"},
-            {"role": "assistant", "content": "4"},
-        ],
     }
 
     completion = trajectory_to_completion(trajectory)
@@ -37,7 +30,6 @@ def test_gym_trajectory_reaches_nemo_rl_flat_training_tensors():
 @pytest.mark.parametrize("field", ["input_ids", "loss_mask", "logprobs", "reward"])
 def test_adapter_rejects_missing_training_field(field):
     trajectory = {
-        "schema_version": 1,
         "input_ids": [10, 11],
         "loss_mask": [0, 1],
         "logprobs": [0.0, -0.1],
@@ -45,18 +37,5 @@ def test_adapter_rejects_missing_training_field(field):
     }
     trajectory.pop(field)
 
-    with pytest.raises(ValueError):
-        trajectory_to_completion(trajectory)
-
-
-def test_adapter_rejects_unknown_schema_version():
-    trajectory = {
-        "schema_version": 2,
-        "input_ids": [10, 11],
-        "loss_mask": [0, 1],
-        "logprobs": [0.0, -0.1],
-        "reward": 1.0,
-    }
-
-    with pytest.raises(ValueError, match="schema_version 2"):
+    with pytest.raises((KeyError, ValueError)):
         trajectory_to_completion(trajectory)

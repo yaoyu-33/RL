@@ -2763,7 +2763,6 @@ def test_setup_initializes_noncolocated_dynamo_with_nemo_gym(monkeypatch) -> Non
         env_configs=master_config.env,
         base_urls=["http://dynamo-wrapper.example/v1"],
         model_name=master_config.policy["model_name"],
-        tokenizer=tokenizer,
         enable_router_replay=False,
         routed_experts_dtype="int16",
         use_fastokens=False,
@@ -3137,7 +3136,6 @@ def test_setup_starts_nemo_gym_for_trtllm(monkeypatch, mock_grpo_components):
         env_configs=master_config.env,
         base_urls=["http://trtllm.example/v1"],
         model_name="test-model",
-        tokenizer=tokenizer,
         enable_router_replay=False,
         routed_experts_dtype="int16",
         use_fastokens=False,
@@ -3471,8 +3469,8 @@ def test_async_grpo_colocated_save_defers_wake_until_after_checkpoint(
     policy_generation.finish_generation.side_effect = lambda *a, **k: events.append(
         ("finish_generation", k.get("release_gpu", True))
     )
-    policy_generation.prepare_for_generation.side_effect = (
-        lambda *a, **k: events.append("wake_engine")
+    policy_generation.prepare_for_generation.side_effect = lambda *a, **k: (
+        events.append("wake_engine")
     )
     policy.offload_before_refit.side_effect = lambda *a, **k: events.append(
         "offload_before_refit"

@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Thin adapter from Gym's framework-neutral trajectory to NeMo-RL."""
+"""Convert Gym's training trajectory to NeMo-RL tensors."""
 
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -21,35 +21,17 @@ import torch
 from nemo_rl.experience.interfaces import Completion
 
 
-SUPPORTED_GYM_TRAJECTORY_SCHEMA_VERSION = 1
-
-
 def trajectory_to_completion(trajectory: Mapping[str, Any]) -> Completion:
-    """Convert one token-aligned Gym trajectory into a NeMo-RL completion.
-
-    Consecutive loss-mask runs become NeMo-RL user/assistant message segments.
-    This preserves arbitrary multi-turn masks without making Gym depend on
-    NeMo-RL's message-log representation.
-    """
-    schema_version = trajectory.get("schema_version")
-    if schema_version != SUPPORTED_GYM_TRAJECTORY_SCHEMA_VERSION:
-        raise ValueError(
-            f"unsupported Gym trajectory schema_version {schema_version!r}; "
-            f"expected {SUPPORTED_GYM_TRAJECTORY_SCHEMA_VERSION}"
-        )
-    input_ids = trajectory.get("input_ids")
-    loss_mask = trajectory.get("loss_mask")
-    logprobs = trajectory.get("logprobs")
-    reward = trajectory.get("reward")
+    """Split a token-aligned Gym trajectory into trainable message runs."""
+    input_ids = trajectory["input_ids"]
+    loss_mask = trajectory["loss_mask"]
+    logprobs = trajectory["logprobs"]
     if not isinstance(input_ids, Sequence) or not input_ids:
         raise ValueError("NeMo-RL requires a non-empty Gym trajectory input_ids")
     if not isinstance(loss_mask, Sequence) or len(loss_mask) != len(input_ids):
         raise ValueError("Gym trajectory loss_mask must align with input_ids")
     if not isinstance(logprobs, Sequence) or len(logprobs) != len(input_ids):
         raise ValueError("NeMo-RL requires token-aligned Gym trajectory logprobs")
-    if reward is None:
-        raise ValueError("NeMo-RL requires a reward before adding a Gym trajectory")
-
     message_log: list[dict[str, Any]] = []
     start = 0
     for end in range(1, len(input_ids) + 1):
@@ -75,14 +57,7 @@ def trajectory_to_completion(trajectory: Mapping[str, Any]) -> Completion:
 
     return Completion(
         message_log=message_log,  # type: ignore[arg-type]
-        env_extras={
-            "task_id": trajectory.get("task_id"),
-            "sample_id": trajectory.get("sample_id"),
-            "metrics": trajectory.get("metrics", {}),
-            "metadata": trajectory.get("metadata", {}),
-            "messages": trajectory.get("messages", []),
-            "steps": trajectory.get("steps", []),
-        },
-        truncated=bool(trajectory.get("metadata", {}).get("truncated", False)),
-        reward=float(reward),
+        env_extras={},
+        truncated=False,
+        reward=float(trajectory["reward"]),
     )

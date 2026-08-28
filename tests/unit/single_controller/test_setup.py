@@ -811,9 +811,6 @@ class TestSetup:
             env_configs=mc.env,
             base_urls=patched_factories["fake_gen"].dp_openai_server_base_urls,
             model_name="test-model",
-            # Reaches the actor once, at spinup, rather than riding along with every
-            # run_rollouts call.
-            tokenizer=tokenizer,
             enable_router_replay=False,
             routed_experts_dtype="int16",
             use_fastokens=False,
