@@ -21,6 +21,9 @@ import torch
 from nemo_rl.experience.interfaces import Completion
 
 
+SUPPORTED_GYM_TRAJECTORY_SCHEMA_VERSION = 1
+
+
 def trajectory_to_completion(trajectory: Mapping[str, Any]) -> Completion:
     """Convert one token-aligned Gym trajectory into a NeMo-RL completion.
 
@@ -28,6 +31,12 @@ def trajectory_to_completion(trajectory: Mapping[str, Any]) -> Completion:
     This preserves arbitrary multi-turn masks without making Gym depend on
     NeMo-RL's message-log representation.
     """
+    schema_version = trajectory.get("schema_version")
+    if schema_version != SUPPORTED_GYM_TRAJECTORY_SCHEMA_VERSION:
+        raise ValueError(
+            f"unsupported Gym trajectory schema_version {schema_version!r}; "
+            f"expected {SUPPORTED_GYM_TRAJECTORY_SCHEMA_VERSION}"
+        )
     input_ids = trajectory.get("input_ids")
     loss_mask = trajectory.get("loss_mask")
     logprobs = trajectory.get("logprobs")

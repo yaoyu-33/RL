@@ -42,6 +42,10 @@ from nemo_rl.distributed.virtual_cluster import (
     _get_node_ip_local,
 )
 from nemo_rl.environments.interfaces import EnvironmentInterface
+from nemo_rl.environments.nemo_gym_trajectory import (
+    SUPPORTED_GYM_TRAJECTORY_SCHEMA_VERSION,
+    trajectory_to_completion,
+)
 from nemo_rl.experience.failures import (
     GymTransportError,
     RolloutDataFailure,
@@ -668,6 +672,16 @@ Depending on your data shape, you may want to change these values."""
             )
         tokenizer = self._tokenizer
 
+        for example in nemo_gym_examples:
+            requested_version = example.setdefault(
+                "_ng_trajectory_version", SUPPORTED_GYM_TRAJECTORY_SCHEMA_VERSION
+            )
+            if requested_version != SUPPORTED_GYM_TRAJECTORY_SCHEMA_VERSION:
+                raise ValueError(
+                    f"unsupported requested Gym trajectory version {requested_version!r}; "
+                    f"expected {SUPPORTED_GYM_TRAJECTORY_SCHEMA_VERSION}"
+                )
+
         from nemo_rl.utils.fastokens import maybe_patch_fastokens
 
         maybe_patch_fastokens(bool(self.cfg.get("use_fastokens")))
@@ -760,6 +774,54 @@ Depending on your data shape, you may want to change these values."""
         assert isinstance(nemo_gym_result, dict), (
             f"Hit a non-successful response when querying NeMo Gym for rollouts: {nemo_gym_result}"
         )
+
+        trajectory = nemo_gym_result.get("trajectory")
+        if (
+            trajectory is not None
+            and getattr(self, "_processor", None) is None
+            and not self.cfg.get("require_routed_experts")
+        ):
+            completion = trajectory_to_completion(trajectory)
+            if (
+                not completion.message_log
+                or completion.message_log[0]["role"] != "user"
+            ):
+                raise ValueError(
+                    "Gym trajectory must begin with non-trainable prompt tokens"
+                )
+            assistant_messages = [
+                message
+                for message in completion.message_log
+                if message["role"] == "assistant"
+            ]
+            model_steps = [
+                step
+                for step in trajectory.get("steps", [])
+                if step.get("type") == "model"
+            ]
+            if len(assistant_messages) != len(model_steps):
+                raise ValueError(
+                    "Gym trajectory model steps must align with trainable token runs"
+                )
+            for message, step in zip(assistant_messages, model_steps):
+                output_item = step.get("output") or {}
+                is_invalid_tool_call, has_malformed_thinking = (
+                    _detect_invalid_tool_call_and_malformed_thinking(
+                        output_item,
+                        invalid_tool_call_patterns=self.cfg.get(
+                            "invalid_tool_call_patterns"
+                        ),
+                        thinking_tags=self.cfg.get("thinking_tags"),
+                    )
+                )
+                message["is_invalid_tool_call"] = is_invalid_tool_call
+                message["has_malformed_thinking"] = has_malformed_thinking
+            return {
+                "message_log": completion.message_log,
+                "input_message_log": completion.message_log[:1],
+                "full_result": nemo_gym_result,
+                "trajectory_schema_version": trajectory["schema_version"],
+            }
 
         processor = getattr(self, "_processor", None)
         response = nemo_gym_result["response"]

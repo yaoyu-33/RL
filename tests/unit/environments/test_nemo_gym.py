@@ -1157,6 +1157,53 @@ def test_nemo_gym_postprocess_uses_batch_decode():
     assert nemo_gym_result["response"]["output"][1]["generation_str"] == "6 7"
 
 
+def test_nemo_gym_postprocess_consumes_negotiated_trajectory():
+    nemo_gym_result = {
+        "trajectory": {
+            "schema_version": 1,
+            "task_id": "arithmetic",
+            "sample_id": "arithmetic:0",
+            "input_ids": [10, 11, 12, 13],
+            "loss_mask": [0, 0, 1, 1],
+            "logprobs": [0.0, 0.0, -0.1, -0.2],
+            "reward": 1.0,
+            "metrics": {},
+            "metadata": {},
+            "messages": [],
+            "steps": [
+                {
+                    "type": "model",
+                    "output": {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "4"}],
+                    },
+                    "generation_span": [2, 4],
+                }
+            ],
+        },
+        "response": {"output": []},
+        "responses_create_params": {"input": []},
+        "reward": 1.0,
+    }
+
+    class _MockSelf:
+        cfg = {}
+
+    result = (
+        NemoGym.__ray_metadata__.modified_class._postprocess_nemo_gym_to_nemo_rl_result(
+            _MockSelf(), {}, nemo_gym_result, object()
+        )
+    )
+
+    assert result["trajectory_schema_version"] == 1
+    assert result["message_log"][0]["token_ids"].tolist() == [10, 11]
+    assert result["message_log"][1]["token_ids"].tolist() == [12, 13]
+    assert result["message_log"][1]["token_loss_mask"].tolist() == [1, 1]
+    assert result["message_log"][1]["generation_logprobs"].tolist() == pytest.approx(
+        [-0.1, -0.2]
+    )
+
+
 @pytest.mark.parametrize("include_initial_multimodal_data", [False, True])
 def test_nemo_gym_dedup_redacts_initial_images_from_actor_return(
     include_initial_multimodal_data,
@@ -1479,6 +1526,7 @@ def test_nemo_gym_run_rollouts_normalizes_mixed_media_before_dispatch(tmp_path):
         class _RolloutCollectionHelper:
             def run_examples(self, examples, head_server_config):
                 del head_server_config
+                assert examples[0]["_ng_trajectory_version"] == 1
                 content = examples[0]["responses_create_params"]["input"][0]["content"]
                 assert content[0]["video_url"] == video_path.resolve().as_uri()
                 assert content[1]["image_url"].startswith("data:image/png;base64,")
