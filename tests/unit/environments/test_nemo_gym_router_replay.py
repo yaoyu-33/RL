@@ -12,114 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
+
 import pytest
 
 from nemo_rl.environments.nemo_gym import NemoGym
 
 
-class _Tokenizer:
-    def batch_decode(self, batch):
-        return [" ".join(map(str, token_ids)) for token_ids in batch]
-
-
-def _routes(num_tokens: int) -> list[list[list[int]]]:
-    return [[[token_idx, token_idx + 100]] for token_idx in range(num_tokens)]
-
-
-def test_nemo_gym_postprocess_slices_routed_experts():
-    first_turn_routes = _routes(3)
-    first_turn_routes[-1] = [[0, 1]]
-    second_turn_routes = _routes(7)
-    second_turn_routes[2] = [[30, 31]]
-    nemo_gym_result = {
-        "response": {
-            "output": [
-                {
-                    "prompt_token_ids": [1, 2],
-                    "generation_token_ids": [3],
-                    "generation_log_probs": [-0.1],
-                    "routed_experts": first_turn_routes,
-                },
-                {
-                    "prompt_token_ids": [1, 2, 3, 4, 5],
-                    "generation_token_ids": [6, 7],
-                    "generation_log_probs": [-0.2, -0.3],
-                    "routed_experts": second_turn_routes,
-                },
-            ]
-        },
-        "responses_create_params": {"input": []},
-    }
-
+def test_minimal_trajectory_demo_rejects_router_replay():
     class _MockSelf:
         cfg = {"require_routed_experts": True}
+        rh = object()
 
-    result = (
-        NemoGym.__ray_metadata__.modified_class._postprocess_nemo_gym_to_nemo_rl_result(
-            _MockSelf(), {}, nemo_gym_result, _Tokenizer()
-        )
+        def _require_spinup(self):
+            pass
+
+    stream = NemoGym.__ray_metadata__.modified_class.run_rollouts(
+        _MockSelf(), [{"_rowidx": 0}], "test"
     )
-
-    message_log = result["message_log"]
-    assert message_log[0]["token_ids"].tolist() == [1, 2]
-    assert message_log[0]["routed_experts"].tolist() == first_turn_routes[:2]
-    assert message_log[1]["token_ids"].tolist() == [3]
-    assert message_log[1]["routed_experts"].tolist() == second_turn_routes[2:3]
-    assert message_log[2]["token_ids"].tolist() == [4, 5]
-    assert message_log[2]["routed_experts"].tolist() == second_turn_routes[3:5]
-    assert message_log[3]["token_ids"].tolist() == [6, 7]
-    assert message_log[3]["routed_experts"].tolist() == second_turn_routes[5:7]
-
-
-def test_nemo_gym_postprocess_requires_routed_experts_when_configured():
-    nemo_gym_result = {
-        "response": {
-            "output": [
-                {
-                    "prompt_token_ids": [1, 2],
-                    "generation_token_ids": [3],
-                    "generation_log_probs": [-0.1],
-                },
-            ]
-        },
-        "responses_create_params": {"input": []},
-    }
-
-    class _MockSelf:
-        cfg = {"require_routed_experts": True}
-
-    with pytest.raises(ValueError, match="requires NeMo Gym output items"):
-        NemoGym.__ray_metadata__.modified_class._postprocess_nemo_gym_to_nemo_rl_result(
-            _MockSelf(), {}, nemo_gym_result, _Tokenizer()
-        )
-
-
-def test_nemo_gym_postprocess_casts_routed_experts_to_configured_dtype():
-    import torch
-
-    nemo_gym_result = {
-        "response": {
-            "output": [
-                {
-                    "prompt_token_ids": [1, 2],
-                    "generation_token_ids": [3],
-                    "generation_log_probs": [-0.1],
-                    "routed_experts": _routes(3),
-                },
-            ]
-        },
-        "responses_create_params": {"input": []},
-    }
-
-    class _MockSelf:
-        cfg = {"require_routed_experts": True, "routed_experts_dtype": "int8"}
-
-    result = (
-        NemoGym.__ray_metadata__.modified_class._postprocess_nemo_gym_to_nemo_rl_result(
-            _MockSelf(), {}, nemo_gym_result, _Tokenizer()
-        )
-    )
-
-    for message in result["message_log"]:
-        if "routed_experts" in message:
-            assert message["routed_experts"].dtype == torch.int8
+    with pytest.raises(NotImplementedError, match="text rollouts only"):
+        asyncio.run(stream.__anext__())

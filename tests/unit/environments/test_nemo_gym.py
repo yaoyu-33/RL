@@ -31,7 +31,6 @@ from nemo_rl.data.interfaces import TaskDataSpec
 from nemo_rl.data.multimodal_utils import (
     MULTIMODAL_CONTENT_TYPES,
     PackedTensor,
-    image_to_data_url,
 )
 from nemo_rl.data.utils import setup_response_data
 from nemo_rl.distributed.ray_actor_environment_registry import (
@@ -56,10 +55,7 @@ from nemo_rl.environments.nemotron_utils import (
     _expand_nemotron_video_placeholders,
     _flatten_nemotron_video_frame_messages,
 )
-from nemo_rl.experience.rollouts import (
-    _reattach_original_multimodal_payloads,
-    attach_static_multimodal_payload,
-)
+from nemo_rl.experience.rollouts import attach_static_multimodal_payload
 from nemo_rl.models.generation.vllm import VllmGeneration
 
 # cluster and tokenizer are fixture imports
@@ -1029,10 +1025,6 @@ openai_model:
 
     # Blocking wait for NeMo-Gym to spin up
     ray.get(env._spinup.remote())
-    # Install the tokenizer here, as spinup_nemo_gym_actor does, so the fixture
-    # yields an actor that can actually run rollouts. Tests reaching the actor
-    # through RolloutManager never see set_tokenizer themselves.
-    ray.get(env.set_tokenizer.remote(nemo_gym_tokenizer))
 
     yield env
     # Clean up the actor and wait for it to be killed
@@ -1086,362 +1078,29 @@ def _write_actual_test_data(original_input: list, actual_result: list):
     print(f"Wrote updated test data to {output_path}")
 
 
-def test_run_rollouts_requires_an_installed_tokenizer():
-    """run_rollouts reads the tokenizer off the actor, so reaching it without one fails.
-
-    Every call site installs it via spinup, so this is unreachable in practice -- but
-    silently postprocessing with no tokenizer is worse than a named error, and a future
-    spinup path that forgets the call should say so here rather than deeper in.
-    """
-    gym_cls = NemoGym.__ray_metadata__.modified_class
-    # Constructed through __init__ rather than object.__new__ so the None comes from
-    # the declaration itself: an attribute set only in _spinup would leave a second
-    # spinup free to wipe an installed tokenizer.
-    gym = gym_cls({})
-    assert gym._tokenizer is None
-    gym.rh = object()  # satisfies _require_spinup
-
-    stream = gym.run_rollouts([{"_rowidx": 0}], "")
-    with pytest.raises(RuntimeError, match="set_tokenizer must be called"):
-        asyncio.run(stream.__anext__())
-
-
-def test_nemo_gym_postprocess_uses_batch_decode():
-    class _Tokenizer:
-        def __init__(self):
-            self.batch_decode_calls = []
-
-        def batch_decode(self, batch):
-            self.batch_decode_calls.append([list(token_ids) for token_ids in batch])
-            return [" ".join(map(str, token_ids)) for token_ids in batch]
-
-    tokenizer = _Tokenizer()
+def test_nemo_gym_postprocess_consumes_trajectory():
     nemo_gym_result = {
-        "response": {
-            "output": [
-                {
-                    "prompt_token_ids": [1, 2],
-                    "generation_token_ids": [3],
-                    "generation_log_probs": [-0.1],
-                },
-                {
-                    "prompt_token_ids": [1, 2, 3, 4, 5],
-                    "generation_token_ids": [6, 7],
-                    "generation_log_probs": [-0.2, -0.3],
-                },
-            ]
+        "trajectory": {
+            "input_ids": [10, 11, 12, 13],
+            "loss_mask": [0, 0, 1, 1],
+            "logprobs": [0.0, 0.0, -0.1, -0.2],
+            "reward": 1.0,
         },
-        "responses_create_params": {"input": []},
-    }
-
-    class _MockSelf:
-        cfg = {}
-
-    result = (
-        NemoGym.__ray_metadata__.modified_class._postprocess_nemo_gym_to_nemo_rl_result(
-            _MockSelf(), {}, nemo_gym_result, tokenizer
-        )
-    )
-
-    assert tokenizer.batch_decode_calls == [
-        [[1, 2], [1, 2, 3, 4, 5]],
-        [[3], [6, 7]],
-    ]
-    assert result["message_log"][0]["token_ids"].tolist() == [1, 2]
-    assert result["message_log"][1]["token_ids"].tolist() == [3]
-    assert result["message_log"][2]["token_ids"].tolist() == [4, 5]
-    assert result["message_log"][3]["token_ids"].tolist() == [6, 7]
-    assert nemo_gym_result["response"]["output"][0]["prompt_str"] == "1 2"
-    assert nemo_gym_result["response"]["output"][0]["generation_str"] == "3"
-    assert nemo_gym_result["response"]["output"][1]["prompt_str"] == "1 2 3 4 5"
-    assert nemo_gym_result["response"]["output"][1]["generation_str"] == "6 7"
-
-
-@pytest.mark.parametrize("include_initial_multimodal_data", [False, True])
-def test_nemo_gym_dedup_redacts_initial_images_from_actor_return(
-    include_initial_multimodal_data,
-):
-    data_url = image_to_data_url(Image.new("RGB", (2, 2), color="red"))
-    initial_input = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": "count"},
-                {"type": "input_image", "image_url": data_url},
-            ],
-        }
-    ]
-    nemo_gym_result = {
-        "response": {
-            "agent_input": deepcopy(initial_input),
-            "seed_obs": deepcopy(initial_input),
-            "output": [
-                {
-                    "prompt_token_ids": [1, 2],
-                    "generation_token_ids": [3],
-                    "generation_log_probs": [-0.1],
-                }
-            ],
-        },
-        "responses_create_params": {"input": deepcopy(initial_input)},
         "reward": 1.0,
     }
 
-    class _Tokenizer:
-        def batch_decode(self, batch):
-            return ["decoded"] * len(batch)
-
-    class _MockSelf:
-        cfg = {}
-        _processor = None
-
     result = (
         NemoGym.__ray_metadata__.modified_class._postprocess_nemo_gym_to_nemo_rl_result(
-            _MockSelf(),
-            {},
-            nemo_gym_result,
-            _Tokenizer(),
-            include_initial_multimodal_data=include_initial_multimodal_data,
+            nemo_gym_result
         )
     )
 
-    if include_initial_multimodal_data:
-        assert "_initial_multimodal_data_omitted" not in result
-        assert data_url in json.dumps(result["full_result"])
-    else:
-        assert result["_initial_multimodal_data_omitted"] is True
-        assert data_url not in json.dumps(result["full_result"])
-        assert result["full_result"]["responses_create_params"]["input"][0][
-            "content"
-        ] == [{"type": "input_text", "text": "count"}]
-
-
-def test_nemo_gym_dedup_omits_actor_initial_tensor_and_preserves_later_media():
-    initial_url = image_to_data_url(Image.new("RGB", (1, 1), color=(1, 0, 0)))
-    tool_url = image_to_data_url(Image.new("RGB", (1, 1), color=(2, 0, 0)))
-    initial_input = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": "inspect"},
-                {"type": "input_image", "image_url": initial_url},
-            ],
-        }
-    ]
-    template = {
-        "response": {
-            "agent_input": deepcopy(initial_input),
-            "seed_obs": deepcopy(initial_input),
-            "output": [
-                {
-                    "prompt_token_ids": [1],
-                    "generation_token_ids": [2],
-                    "generation_log_probs": [-0.1],
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_image", "image_url": tool_url},
-                    ],
-                },
-                {
-                    "prompt_token_ids": [1, 2, 3],
-                    "generation_token_ids": [4],
-                    "generation_log_probs": [-0.2],
-                },
-            ],
-        },
-        "responses_create_params": {"input": deepcopy(initial_input)},
-        "reward": 1.0,
-    }
-
-    class _Tokenizer:
-        def batch_decode(self, batch):
-            return ["decoded"] * len(batch)
-
-    class _ImageProcessor:
-        model_input_names = ["pixel_values"]
-
-    class _TextTokenizer:
-        model_input_names = ["input_ids"]
-
-    class _Processor:
-        image_token = "<image>"
-        image_processor = _ImageProcessor()
-        tokenizer = _TextTokenizer()
-        model_input_names = ["input_ids", "pixel_values"]
-
-        def __call__(self, *, text, images, return_tensors):
-            assert text == "<image>" * len(images)
-            assert return_tensors == "pt"
-            red_values = [image.getpixel((0, 0))[0] for image in images]
-            return {
-                "input_ids": torch.tensor([[1]]),
-                "pixel_values": torch.tensor(red_values, dtype=torch.float32).view(
-                    -1, 1
-                ),
-            }
-
-    class _MockSelf:
-        cfg = {}
-        _processor = _Processor()
-
-    postprocess = (
-        NemoGym.__ray_metadata__.modified_class._postprocess_nemo_gym_to_nemo_rl_result
+    assert result["message_log"][0]["token_ids"].tolist() == [10, 11]
+    assert result["message_log"][1]["token_ids"].tolist() == [12, 13]
+    assert result["message_log"][1]["token_loss_mask"].tolist() == [1, 1]
+    assert result["message_log"][1]["generation_logprobs"].tolist() == pytest.approx(
+        [-0.1, -0.2]
     )
-    flag_off = postprocess(
-        _MockSelf(),
-        {},
-        deepcopy(template),
-        _Tokenizer(),
-        include_initial_multimodal_data=True,
-    )
-    flag_on = postprocess(
-        _MockSelf(),
-        {},
-        deepcopy(template),
-        _Tokenizer(),
-        include_initial_multimodal_data=False,
-    )
-
-    off_users = [
-        message for message in flag_off["message_log"] if message["role"] == "user"
-    ]
-    on_users = [
-        message for message in flag_on["message_log"] if message["role"] == "user"
-    ]
-    assert off_users[0]["pixel_values"].as_tensor().item() == 1
-    assert off_users[1]["pixel_values"].as_tensor().item() == 2
-    assert "pixel_values" not in on_users[0]
-    assert on_users[1]["pixel_values"].as_tensor().item() == 2
-    assert initial_url not in json.dumps(flag_on["full_result"])
-    assert tool_url in json.dumps(flag_on["full_result"])
-
-    original_media = PackedTensor(torch.tensor([[99.0]]), dim_to_pack=0)
-    _reattach_original_multimodal_payloads(
-        [flag_on],
-        [[{"role": "user", "content": "", "pixel_values": original_media}]],
-    )
-    on_users = [
-        message for message in flag_on["message_log"] if message["role"] == "user"
-    ]
-    assert on_users[0]["pixel_values"] is original_media
-    assert on_users[1]["pixel_values"].as_tensor().item() == 2
-
-
-@pytest.mark.parametrize(
-    ("seed_mode", "expected_pixel_values"),
-    [
-        ("text_only", None),
-        ("initial_plus_additional", [1.0, 2.0]),
-    ],
-)
-def test_nemo_gym_dedup_keeps_authoritative_changed_seed_media(
-    seed_mode, expected_pixel_values
-):
-    initial_url = image_to_data_url(Image.new("RGB", (1, 1), color=(1, 0, 0)))
-    additional_url = image_to_data_url(Image.new("RGB", (1, 1), color=(2, 0, 0)))
-    initial_input = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": "inspect"},
-                {"type": "input_image", "image_url": initial_url},
-            ],
-        }
-    ]
-    if seed_mode == "text_only":
-        seed_obs = [
-            {
-                "role": "user",
-                "content": [{"type": "input_text", "text": "text only"}],
-            }
-        ]
-    else:
-        seed_obs = deepcopy(initial_input)
-        seed_obs[0]["content"].append(
-            {"type": "input_image", "image_url": additional_url}
-        )
-
-    nemo_gym_result = {
-        "response": {
-            "agent_input": deepcopy(initial_input),
-            "seed_obs": seed_obs,
-            "output": [
-                {
-                    "prompt_token_ids": [1],
-                    "generation_token_ids": [2],
-                    "generation_log_probs": [-0.1],
-                }
-            ],
-        },
-        "responses_create_params": {"input": deepcopy(initial_input)},
-        "reward": 1.0,
-    }
-
-    class _Tokenizer:
-        def batch_decode(self, batch):
-            return ["decoded"] * len(batch)
-
-    class _ImageProcessor:
-        model_input_names = ["pixel_values"]
-
-    class _TextTokenizer:
-        model_input_names = ["input_ids"]
-
-    class _Processor:
-        image_token = "<image>"
-        image_processor = _ImageProcessor()
-        tokenizer = _TextTokenizer()
-        model_input_names = ["input_ids", "pixel_values"]
-
-        def __call__(self, *, text, images, return_tensors):
-            assert text == "<image>" * len(images)
-            assert return_tensors == "pt"
-            red_values = [image.getpixel((0, 0))[0] for image in images]
-            return {
-                "input_ids": torch.tensor([[1]]),
-                "pixel_values": torch.tensor(red_values, dtype=torch.float32).view(
-                    -1, 1
-                ),
-            }
-
-    class _MockSelf:
-        cfg = {}
-        _processor = _Processor()
-
-    result = (
-        NemoGym.__ray_metadata__.modified_class._postprocess_nemo_gym_to_nemo_rl_result(
-            _MockSelf(),
-            {},
-            nemo_gym_result,
-            _Tokenizer(),
-            include_initial_multimodal_data=False,
-        )
-    )
-
-    assert result["_initial_multimodal_data_omitted"] is False
-    user_message = next(
-        message for message in result["message_log"] if message["role"] == "user"
-    )
-    if expected_pixel_values is None:
-        assert "pixel_values" not in user_message
-    else:
-        assert user_message["pixel_values"].as_tensor().flatten().tolist() == (
-            expected_pixel_values
-        )
-
-    original_media = PackedTensor(torch.tensor([[99.0]]), dim_to_pack=0)
-    _reattach_original_multimodal_payloads(
-        [result],
-        [[{"role": "user", "content": "", "pixel_values": original_media}]],
-    )
-    if expected_pixel_values is None:
-        assert "pixel_values" not in user_message
-    else:
-        assert user_message["pixel_values"].as_tensor().flatten().tolist() == (
-            expected_pixel_values
-        )
 
 
 def test_nemo_gym_run_rollouts_normalizes_mixed_media_before_dispatch(tmp_path):
@@ -1473,7 +1132,6 @@ def test_nemo_gym_run_rollouts_normalizes_mixed_media_before_dispatch(tmp_path):
             },
         }
         nemo_gym_result = {"response": {"output": []}}
-        tokenizer = object()
         postprocess_calls = []
 
         class _RolloutCollectionHelper:
@@ -1496,101 +1154,23 @@ def test_nemo_gym_run_rollouts_normalizes_mixed_media_before_dispatch(tmp_path):
             def _require_spinup(self):
                 pass
 
-            def _postprocess_nemo_gym_to_nemo_rl_result(
-                self,
-                row,
-                result,
-                result_tokenizer,
-                *,
-                include_initial_multimodal_data,
-            ):
+            def _postprocess_nemo_gym_to_nemo_rl_result(self, result):
                 del self
-                postprocess_calls.append(
-                    (
-                        row,
-                        result,
-                        result_tokenizer,
-                        include_initial_multimodal_data,
-                    )
-                )
+                postprocess_calls.append(result)
                 return {"message_log": []}
 
         mock_self = _MockSelf()
-        mock_self._tokenizer = tokenizer
         streamed_results = []
         async for result in NemoGym.__ray_metadata__.modified_class.run_rollouts(
             mock_self, [nemo_gym_row], "test"
         ):
             streamed_results.append(result)
 
-        assert postprocess_calls == [(nemo_gym_row, nemo_gym_result, tokenizer, True)]
+        assert postprocess_calls == [nemo_gym_result]
         assert streamed_results[0][0] == 7
         assert streamed_results[0][1] == {"message_log": []}
 
     asyncio.run(_run())
-
-
-def test_nemo_gym_postprocess_no_generation_data_raises():
-    """When no output item carries generation data, the postprocess should raise a
-    ValueError that reports the prompt length and the response.output item types."""
-
-    class _Tokenizer:
-        def apply_chat_template(self, input_messages, tokenize=True):
-            # Pretend the prompt is 1234 tokens long.
-            return list(range(1234))
-
-    nemo_gym_result = {
-        "response": {
-            "output": [
-                {"type": "reasoning"},
-                {"type": "function_call"},
-            ]
-        },
-        "responses_create_params": {"input": [{"role": "user", "content": "hi"}]},
-    }
-
-    class _MockSelf:
-        cfg = {}
-
-    with pytest.raises(ValueError) as excinfo:
-        NemoGym.__ray_metadata__.modified_class._postprocess_nemo_gym_to_nemo_rl_result(
-            _MockSelf(), {}, nemo_gym_result, _Tokenizer()
-        )
-
-    msg = str(excinfo.value)
-    assert "no generation data" in msg
-    assert "1234 tokens" in msg
-    # The error surfaces the response.output item types to help diagnose case (2).
-    assert "['reasoning', 'function_call']" in msg
-
-
-def test_nemo_gym_postprocess_no_generation_data_chat_template_failure():
-    """If apply_chat_template itself fails while building the error message, the
-    postprocess should still raise the original 'no generation data' ValueError with
-    the prompt length reported as unknown rather than masking it with a new error."""
-
-    class _Tokenizer:
-        def apply_chat_template(self, input_messages, tokenize=True):
-            raise RuntimeError("boom")
-
-    nemo_gym_result = {
-        "response": {"output": [{"type": "reasoning"}]},
-        "responses_create_params": {"input": [{"role": "user", "content": "hi"}]},
-    }
-
-    class _MockSelf:
-        cfg = {}
-
-    with pytest.raises(ValueError) as excinfo:
-        NemoGym.__ray_metadata__.modified_class._postprocess_nemo_gym_to_nemo_rl_result(
-            _MockSelf(), {}, nemo_gym_result, _Tokenizer()
-        )
-
-    msg = str(excinfo.value)
-    assert "no generation data" in msg
-    assert "apply_chat_template failed" in msg
-    assert "RuntimeError" in msg
-    assert "['reasoning']" in msg
 
 
 @pytest.mark.nemo_gym
